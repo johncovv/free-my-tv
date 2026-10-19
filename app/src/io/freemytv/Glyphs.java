@@ -6,17 +6,14 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
-import android.graphics.drawable.Drawable;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Official coin logos (BTC, ETH, SOL, USDT), flat and single-color: just the symbol, no disc or gradient
- * (res/drawable/coin_*.xml, vector drawables from the open cryptocurrency-icons set, CC0). The four symbols were
- * drawn on the same 32-unit frame with balanced visual "weight", so here they all use the same frame scale and only
- * the spare space on the sides is trimmed. Each size is drawn once into an exact-size bitmap and reused (sharp, no
- * resampling).
+ * Currency symbols for the exchange rates ($, €, £, ¥): Phosphor's filled icons (MIT), rendered by tools/make_phosphor.py
+ * as white PNGs in assets/symbols/cur_*.png. All use the same frame, and only the spare space on the sides is trimmed.
+ * Each size is drawn once into an exact-size bitmap and reused (sharp, no resampling).
  */
 final class Glyphs {
     private Glyphs() {}
@@ -54,12 +51,18 @@ final class Glyphs {
         String key = coin + "@" + frame;
         synchronized (BITMAPS) {
             if (BITMAPS.containsKey(key)) return BITMAPS.get(key);
-            Drawable d = context.getDrawable(id(coin));
+            Bitmap src = null;
+            try (java.io.InputStream in = context.getAssets().open("symbols/cur_" + coin.toLowerCase(java.util.Locale.ROOT) + ".png")) {
+                src = android.graphics.BitmapFactory.decodeStream(in);
+            } catch (java.io.IOException ignored) {
+            }
             Bitmap b = null;
-            if (d != null) {
+            if (src != null) {
                 Bitmap full = Bitmap.createBitmap(frame, frame, Bitmap.Config.ARGB_8888);
-                d.setBounds(0, 0, frame, frame);
-                d.draw(new Canvas(full));
+                float scale = Math.min((float) frame / src.getWidth(), (float) frame / src.getHeight()) * 0.8f;
+                float w = src.getWidth() * scale, h = src.getHeight() * scale;
+                new Canvas(full).drawBitmap(src, null, new android.graphics.RectF((frame - w) / 2, (frame - h) / 2,
+                        (frame + w) / 2, (frame + h) / 2), new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG));
                 b = trimSides(full);
             }
             BITMAPS.put(key, b);
@@ -83,14 +86,5 @@ final class Glyphs {
         }
         if (right < left) return b;
         return Bitmap.createBitmap(b, left, 0, right - left + 1, h);
-    }
-
-    private static int id(String coin) {
-        switch (coin) {
-            case "BTC": return R.drawable.coin_btc;
-            case "ETH": return R.drawable.coin_eth;
-            case "SOL": return R.drawable.coin_sol;
-            default: return R.drawable.coin_usdt;
-        }
     }
 }

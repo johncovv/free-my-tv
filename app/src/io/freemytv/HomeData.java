@@ -24,16 +24,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Crypto prices (Binance, every 5 min) and weather/sunrise/sunset for your location (Open-Meteo, every 30 min), cached
+ * Exchange rates (AwesomeAPI, every 5 min) and weather/sunrise/sunset for your location (Open-Meteo, every 30 min), cached
  * so the screen opens with numbers. Only fetched while the home screen or the screensaver is visible (the screen asks).
  * Neither source needs a key. Location and currency come from config.properties.
  */
 final class HomeData {
-    static final String[] COINS = {"BTC", "ETH", "SOL", "USDT"};
-    static final String[] COIN_NAMES = {"Bitcoin", "Ethereum", "Solana", "Dollar"};
     private static final String CURRENCY = Config.CURRENCY.trim().toUpperCase(Locale.ROOT);
-    /** Binance quotes dollars as USDT. */
-    private static final String QUOTE = CURRENCY.equals("USD") ? "USDT" : CURRENCY;
+    /** Dollar, euro, pound and yuan, priced in the configured currency (the one you pay in is left out). */
+    static final String[] COINS = without(new String[] {"USD", "EUR", "GBP", "CNY"}, CURRENCY);
     private static final String WEATHER_URL = "https://api.open-meteo.com/v1/forecast?latitude=" + Config.LATITUDE
             + "&longitude=" + Config.LONGITUDE
             + "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset"
@@ -43,19 +41,30 @@ final class HomeData {
 
     interface Listener { void onData(); }
 
-    /** BTC, ETH and SOL; in Brazilian reais also the dollar (USDT/BRL), which Binance doesn't list for most currencies. */
     static int coinCount() {
-        return CURRENCY.equals("BRL") ? COINS.length : 3;
+        return COINS.length;
     }
 
     static String coinName(int i) {
-        return i == 3 ? Ui.tr("Dólar", "Dollar") : COIN_NAMES[i];
+        switch (COINS[i]) {
+            case "USD": return Ui.tr("Dólar", "Dollar");
+            case "EUR": return "Euro";
+            case "GBP": return Ui.tr("Libra", "Pound");
+            case "CNY": return "Yuan";
+            default: return COINS[i];
+        }
+    }
+
+    private static String[] without(String[] list, String drop) {
+        List<String> out = new ArrayList<>();
+        for (String s : list) if (!s.equals(drop)) out.add(s);
+        return out.toArray(new String[0]);
     }
 
     private static String pricesUrl() {
-        StringBuilder symbols = new StringBuilder();
-        for (int i = 0; i < coinCount(); i++) symbols.append(i == 0 ? "" : ",").append("%22").append(COINS[i]).append(QUOTE).append("%22");
-        return "https://api.binance.com/api/v3/ticker/24hr?type=MINI&symbols=%5B" + symbols + "%5D";
+        StringBuilder pairs = new StringBuilder();
+        for (int i = 0; i < COINS.length; i++) pairs.append(i == 0 ? "" : ",").append(COINS[i]).append('-').append(CURRENCY);
+        return "https://economia.awesomeapi.com.br/json/last/" + pairs;
     }
 
     static final class Weather {
@@ -92,9 +101,9 @@ final class HomeData {
     private HomeData(Context c) {
         cache = c.getSharedPreferences("homedata", Context.MODE_PRIVATE);
         try {
-            String p = cache.getString("prices", null);
-            if (p != null) parsePrices(p);
             pricesAt = cache.getLong("pricesAt", 0);
+            String p = cache.getString("prices", null);
+            if (p != null) parsePrices(p);   // after pricesAt: an unreadable cache resets it, so it's fetched again
             String w = cache.getString("weather", null);
             if (w != null) weather = parseWeather(w);
             weatherAt = cache.getLong("weatherAt", 0);
@@ -146,23 +155,18 @@ final class HomeData {
         main.post(() -> { for (Listener l : new ArrayList<>(listeners)) l.onData(); });
     }
 
+    /** {"USDBRL": {"bid": "5.03", "pctChange": "-0.68", ...}, ...} */
     private void parsePrices(String body) throws Exception {
-        JSONArray list = new JSONArray(body);
-        String quote = QUOTE;
+        JSONObject all = new JSONObject(body.trim().startsWith("{") ? body : "{}");
         int found = 0;
-        for (int i = 0; i < list.length(); i++) {
-            JSONObject o = list.getJSONObject(i);
-            String symbol = o.getString("symbol");
-            for (int k = 0; k < COINS.length; k++) {
-                if (!symbol.equals(COINS[k] + quote)) continue;
-                found++;
-                double last = Double.parseDouble(o.optString("lastPrice", o.optString("price", "NaN")));
-                double open = Double.parseDouble(o.optString("openPrice", "NaN"));
-                prices[k] = last;
-                changes[k] = open > 0 ? (last - open) / open * 100 : Double.NaN;
-            }
+        for (int k = 0; k < COINS.length; k++) {
+            JSONObject o = all.optJSONObject(COINS[k] + CURRENCY);
+            if (o == null) continue;
+            found++;
+            prices[k] = Double.parseDouble(o.optString("bid", "NaN"));
+            changes[k] = Double.parseDouble(o.optString("pctChange", "NaN"));
         }
-        if (found == 0) pricesAt = 0;   // cached in another currency (config changed): fetch again
+        if (found == 0) pricesAt = 0;   // cached in another currency or format (config changed): fetch again
     }
 
     private static Weather parseWeather(String body) throws Exception {
