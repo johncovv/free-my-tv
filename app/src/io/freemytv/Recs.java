@@ -43,7 +43,7 @@ final class Recs {
     static final class Pick {
         int id;
         String kind;            // "movie" or "tv"
-        String title, backdrop, meta = "", app, pkg;
+        String title, backdrop, poster, meta = "", app, pkg;
         boolean detailed;
         boolean mine;           // from "Your Taste" (taste_titles and taste_genres), not the trending list
     }
@@ -59,7 +59,7 @@ final class Recs {
     private static final String IMAGES = "https://image.tmdb.org/t/p/original";
     private static final long LIST_EVERY = 6 * 3600_000L;
     /** Bump when what is saved for each title changes (the saved list is discarded and fetched again). */
-    private static final int CACHE_VERSION = 3;
+    private static final int CACHE_VERSION = 4;
     private static final int MANHA = 0, TARDE = 1, NOITE = 2;
     static final String[] PERIOD_LABEL = {"PARA ESTA MANHÃ", "PARA ESTA TARDE", "PARA ESTA NOITE"};
     static final String[] PERIOD_LABEL_EN = {"THIS MORNING", "THIS AFTERNOON", "TONIGHT"};
@@ -560,8 +560,56 @@ final class Recs {
         {"western", "37", "37"}, {"musica", "10402", "0"}, {"music", "10402", "0"},
     };
 
+    /** "Your Taste" picks ready to show (details in, on an app the TV has), for the Explore screen. */
+    List<Pick> taste() {
+        List<Pick> out = new ArrayList<>();
+        for (Pick p : picks) if (p.mine && p.detailed && p.pkg != null) out.add(p);
+        return out;
+    }
+
+    /**
+     * The discover filter for the TV's streaming services in your region ("&language=…&with_watch_providers=8|119…"),
+     * looked up once per process. Blocking.
+     */
+    String servicesFilter() throws Exception {
+        if (filter != null) return filter;
+        StringBuilder ids = new StringBuilder();
+        JSONArray providers = get("/watch/providers/movie?language=" + lang() + "&watch_region=" + REGION).getJSONArray("results");
+        for (int i = 0; i < providers.length(); i++) {
+            JSONObject o = providers.getJSONObject(i);
+            String[] s = service(o.optString("provider_name"));
+            if (s != null && installed(s[2])) ids.append(ids.length() == 0 ? "" : "|").append(o.getInt("provider_id"));
+        }
+        if (ids.length() == 0) throw new IOException("none of the TV's streaming services are on TMDB");
+        filter = "&language=" + lang() + "&watch_region=" + REGION + "&with_watch_monetization_types=flatrate&include_adult=false"
+                + "&with_watch_providers=" + URLEncoder.encode(ids.toString(), "UTF-8");
+        return filter;
+    }
+
+    private volatile String filter;
+
+    /** From a title's "watch/providers": {HomeApps key, package} of the first service the TV has, or null. */
+    String[] serviceOf(JSONObject watchProviders) {
+        JSONObject results = watchProviders == null ? null : watchProviders.optJSONObject("results");
+        JSONObject here = results == null ? null : results.optJSONObject(REGION);
+        JSONArray flat = here == null ? null : here.optJSONArray("flatrate");
+        for (int i = 0; flat != null && i < flat.length(); i++) {
+            String[] s = service(flat.optJSONObject(i).optString("provider_name"));
+            if (s != null && installed(s[2])) return new String[] {s[1], s[2]};
+        }
+        return null;
+    }
+
+    static String serviceName(String appKey) {
+        return appKey == null ? "" : SERVICE_NAME.get(appKey);
+    }
+
+    static String genreName(String name) {
+        return Ui.en ? name : genre(name);
+    }
+
     /** Language of titles and genres; the services come from the region. */
-    private static String lang() {
+    static String lang() {
         return Ui.en ? "en-US" : "pt-BR";
     }
 
@@ -587,6 +635,8 @@ final class Recs {
         p.kind = kind;
         p.title = o.optString(kind.equals("movie") ? "title" : "name");
         p.backdrop = backdrop;
+        String poster = o.optString("poster_path", "");
+        p.poster = poster.isEmpty() || "null".equals(poster) ? null : poster;
         list.add(p);
     }
 
@@ -683,6 +733,11 @@ final class Recs {
     }
 
     private JSONObject get(String path) throws IOException, org.json.JSONException {
+        return tmdb(path);
+    }
+
+    /** A TMDB API call (path after /3), with your key. Blocking: background threads only. */
+    static JSONObject tmdb(String path) throws IOException, org.json.JSONException {
         String key = readKey();
         if (key == null) throw new IOException("no TMDB key");
         boolean bearer = key.startsWith("eyJ");   // read access token (v4) or API key (v3)
@@ -702,7 +757,7 @@ final class Recs {
         }
     }
 
-    private String readKey() {
+    private static String readKey() {
         String key = Config.TMDB_KEY.trim();
         return key.isEmpty() ? null : key;
     }
@@ -779,7 +834,7 @@ final class Recs {
         try {
             JSONArray a = new JSONArray();
             for (Pick p : picks) {
-                a.put(new JSONObject().put("id", p.id).put("kind", p.kind).put("title", p.title).put("backdrop", p.backdrop)
+                a.put(new JSONObject().put("id", p.id).put("kind", p.kind).put("title", p.title).put("backdrop", p.backdrop).put("poster", p.poster == null ? "" : p.poster)
                         .put("meta", p.meta).put("app", p.app == null ? "" : p.app).put("pkg", p.pkg == null ? "" : p.pkg)
                         .put("detailed", p.detailed).put("mine", p.mine));
             }
@@ -800,6 +855,7 @@ final class Recs {
             p.kind = o.optString("kind");
             p.title = o.optString("title");
             p.backdrop = o.optString("backdrop");
+            p.poster = o.optString("poster").isEmpty() ? null : o.optString("poster");
             p.meta = fixGenres(o.optString("meta"));
             p.app = o.optString("app").isEmpty() ? null : o.optString("app");
             p.pkg = o.optString("pkg").isEmpty() ? null : o.optString("pkg");

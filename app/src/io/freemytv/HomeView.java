@@ -1640,6 +1640,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     boolean onKey(KeyEvent e) {
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
         switch (e.getKeyCode()) {
+            case KeyEvent.KEYCODE_SEARCH:
+                if (down && e.getRepeatCount() == 0) openExplore(true);
+                return true;
             case KeyEvent.KEYCODE_DPAD_LEFT:
                 if (down) move(-1, 0);
                 return true;
@@ -1674,6 +1677,17 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 return true;
             default:
                 return false;
+        }
+    }
+
+    /** The Explore screen (recommendations, new releases, genres, search); `search` opens straight on search. */
+    private void openExplore(boolean search) {
+        click.open();
+        try {
+            activity.startActivity(new android.content.Intent(activity, ExploreActivity.class)
+                    .putExtra(ExploreActivity.EXTRA_SEARCH, search));
+        } catch (RuntimeException e) {
+            AppLog.w("explore: " + e.getMessage());
         }
     }
 
@@ -1829,6 +1843,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         } else if (zone == Z_TOP) {
             if (topIndex < NT) {
                 selectTab(topIndex);
+                if (topIndex == 0) openExplore(false);   // OK on "Explore": the full Explore screen
                 return;
             }
             it = lightButtons.get(topIndex - NT);

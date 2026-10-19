@@ -20,6 +20,7 @@ Open source. Built with Claude Code. One button to undo.
 - **No ads.** No sponsored rows, banners or autoplaying promos. Not one.
 - **Your apps, front and center.** The streaming apps you actually use, on a glass shelf.
 - **Trending, not sponsored.** Three fresh picks every hour from what's trending this week and the latest releases, only from apps you already have. Movies and Shows get their own tabs.
+- **Explore.** OK on the Explore tab (or the remote's search key): recommendations for you, new releases, genres and search, only what's on your services. It closes when you leave, so the home screen stays light.
 - **Weather and exchange rates, one press away.** The hour-by-hour forecast, sunrise and sunset, and exchange rates (dollar, euro, pound and yuan).
 - **Light by day, dark by night.** It follows your city's real sunset, the way your phone does.
 - **A screensaver to match.** Full-screen photos of the picks with a big glass clock.
