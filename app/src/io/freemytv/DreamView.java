@@ -13,6 +13,7 @@ import android.graphics.RecordingCanvas;
 import android.graphics.RenderNode;
 import android.graphics.RuntimeShader;
 import android.graphics.Shader;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -66,7 +67,8 @@ final class DreamView extends View implements Choreographer.FrameCallback, HomeD
             this.image = image;
             this.frost = frost;
             shader = new BitmapShader(frost, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            shader.setFilterMode(BitmapShader.FILTER_MODE_LINEAR);
+            // Android 13+ only (and only its glass clock reads this shader); older ones crashed here.
+            if (Build.VERSION.SDK_INT >= 33) shader.setFilterMode(BitmapShader.FILTER_MODE_LINEAR);
             this.lightCaption = lightCaption;
             this.lightClock = lightClock;
             zoomIn = n % 2 == 0;
