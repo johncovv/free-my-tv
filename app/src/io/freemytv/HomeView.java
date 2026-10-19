@@ -137,7 +137,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final Map<String, int[]> TILE_STYLE = new HashMap<>();
     static {
         TILE_STYLE.put("netflix", new int[] {0xFF0A0A0A, 0xFF000000, 0});
-        TILE_STYLE.put("youtube", new int[] {0xFFFFFFFF, 0xFFECECEC, 2});
+        TILE_STYLE.put("youtube", new int[] {0xFF1C1C1E, 0xFF09090A, 0});
         TILE_STYLE.put("smarttube", new int[] {0xFF1E1E22, 0xFF0B0B0D, 0});
         TILE_STYLE.put("globoplay", new int[] {0xFFFF8A1F, 0xFFFF2D5A, 1});
         TILE_STYLE.put("prime", new int[] {0xFF2AA8FF, 0xFF0A68D4, 1});

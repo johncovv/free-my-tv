@@ -217,19 +217,6 @@ final class HomeMode {
         return !homeHolder(adb).contains(PKG);
     }
 
-    /**
-     * The package holding the home role; where "cmd role get-role-holders" is missing (Android 11, some TVs) or
-     * names no one, the package of the activity that answers the Home button.
-     */
-    private static String homeHolder(Adb adb) throws IOException {
-        String role = adb.shell("cmd role get-role-holders --user 0 android.app.role.HOME").trim();
-        if (role.matches("[A-Za-z0-9_.]+")) return role;   // a package name (TVs without the command print an error)
-        String[] lines = adb.shell("cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN"
-                + " -c android.intent.category.HOME").trim().split("\n");
-        String last = lines[lines.length - 1].trim();
-        return last.contains("/") ? last.substring(0, last.indexOf('/')) : "";
-    }
-
     /** Safety net: our home screen crashed 3 times in a row. Only the home screen goes back; the rest stays. */
     static void revertHomeNow(Context app) {
         synchronized (RUN) {
@@ -339,6 +326,20 @@ final class HomeMode {
             if (line.startsWith(holder + "/")) return line;
         }
         return null;
+    }
+
+    /**
+     * The package that is the home screen now, or "". Some Android 12 TVs have no `cmd role get-role-holders` (it
+     * answers "Unknown command"), so then we ask which activity opens HOME.
+     */
+    private static String homeHolder(Adb adb) throws IOException {
+        String holder = adb.shell("cmd role get-role-holders --user 0 android.app.role.HOME").trim();
+        if (holder.matches("[\\w.]+(;[\\w.]+)*")) return holder;
+        String[] lines = adb.shell("cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN"
+                + " -c android.intent.category.HOME").trim().split("\n");
+        String component = lines[lines.length - 1].trim();
+        // With no default home yet, the system's chooser answers ("android/...ResolverActivity"): unknown.
+        return component.contains("/") && !component.startsWith("android/") ? packageOf(component) : "";
     }
 
     /** The system's default screensaver ("package/service"), or "". */
