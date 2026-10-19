@@ -59,6 +59,8 @@ final class HomeApps {
     static final int INPUTS = 7;
     /** The "Explore" button: opens the Explore screen (the home screen handles it). */
     static final int EXPLORE = 8;
+    /** The "Music" button: opens the Music screen (your Spotify). */
+    static final int MUSIC = 9;
     /** Image size of each card (16:9; on screen it shows up to ~330 px wide). */
     static final int TILE_W = 384, TILE_H = 216;
 

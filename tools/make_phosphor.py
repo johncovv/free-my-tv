@@ -20,7 +20,7 @@ MAP = {
     "check": ("check", "fill"), "play": ("play", "fill"), "tv_settings": ("sliders-horizontal", "fill"),
     "chevron_down": ("caret-down", "fill"), "sunrise": ("sun-horizon", "fill"), "sunset": ("sun-horizon", "fill"),
     "live_tv": ("television", "fill"), "tv": ("television-simple", "fill"),
-    "compass": ("compass", "fill"), "microphone": ("microphone", "fill"),
+    "compass": ("compass", "fill"), "microphone": ("microphone", "fill"), "music": ("music-notes", "fill"),
     "cur_usd": ("currency-dollar", "fill"), "cur_eur": ("currency-eur", "fill"),
     "cur_gbp": ("currency-gbp", "fill"), "cur_cny": ("currency-cny", "fill"),
 }

@@ -59,6 +59,8 @@ final class Config {
     static final String THEME = "$(prop theme auto)";
     static final String TASTE_TITLES = "$(prop taste_titles '')";
     static final String TASTE_GENRES = "$(prop taste_genres '')";
+    static final String SPOTIFY_CLIENT_ID = "$(prop spotify_client_id '')";
+    static final String SPOTIFY_REFRESH_TOKEN = "$(prop spotify_refresh_token '')";
     static final boolean DISABLE_ASSISTANT = $ASSIST;
 }
 EOF

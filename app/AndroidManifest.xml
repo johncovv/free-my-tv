@@ -117,6 +117,16 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection"
             android:theme="@style/FreeMyTV.Home" />
 
+        <!-- Music: your Spotify account. Closes when left (finish in onStop). -->
+        <activity
+            android:name=".MusicActivity"
+            android:process=":home"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection"
+            android:theme="@style/FreeMyTV.Home" />
+
         <!-- Main process, not :home: on Android 11 the dream's activity starts in the app's default process and
              crashes (ClassCastException on DreamActivityCallback) when the service lives in another one. -->
         <service

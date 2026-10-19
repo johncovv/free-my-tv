@@ -48,9 +48,13 @@ final class Cards {
         String kind, title, poster, backdrop, overview = "", meta = "", app, pkg;
         boolean detailed;
         StaticLayout label;   // the name, shown while the poster loads
+        String uri;           // Spotify: what to open (spotify:album:…)
+        boolean square, round;   // music: square cover; artists: a circle
     }
 
     static final float POSTER_W = 196, POSTER_H = 294;
+    /** Music covers and artist photos are kept at this size (square). */
+    static final int SQUARE = 240;
     static final int BG = 0xFF0E0F12, INK = 0xFFF5F5F7, INK2 = 0xA3F5F5F7, INK3 = 0x6BF5F5F7;
     static final int GLASS = 0x14FFFFFF, GLASS2 = 0x24FFFFFF, RIM = 0x1FFFFFFF;
     private static final String IMAGES = "https://image.tmdb.org/t/p/";
@@ -136,7 +140,8 @@ final class Cards {
         images.execute(() -> {
             Bitmap done = null;
             try {
-                done = decode(download("w342", path), Math.round(POSTER_W), Math.round(POSTER_H));
+                int w = t.square ? SQUARE : Math.round(POSTER_W), h = t.square ? SQUARE : Math.round(POSTER_H);
+                done = decode(download("w342", path), w, h);
             } catch (Exception e) {
                 AppLog.w("poster: " + e.getMessage());
             }
@@ -174,12 +179,13 @@ final class Cards {
         return null;
     }
 
-    /** The image at TMDB's `size`, from the disk cache or downloaded into it. */
-    private byte[] download(String size, String path) throws IOException {
+    /** The image at TMDB's `size` (or a full URL: Spotify), from the disk cache or downloaded into it. */
+    byte[] download(String size, String path) throws IOException {
+        boolean url = path.startsWith("https://");
         File dir = new File(context.getCacheDir(), "explore");
-        File f = new File(dir, size + path.replace("/", "_"));
+        File f = new File(dir, url ? "u" + Integer.toHexString(path.hashCode()) + path.length() : size + path.replace("/", "_"));
         if (f.exists()) return readAll(new FileInputStream(f));
-        HttpURLConnection c = (HttpURLConnection) new URL(IMAGES + size + path).openConnection();
+        HttpURLConnection c = (HttpURLConnection) new URL(url ? path : IMAGES + size + path).openConnection();
         c.setConnectTimeout(8000);
         c.setReadTimeout(10000);
         try {
@@ -207,7 +213,7 @@ final class Cards {
     }
 
     /** Decodes and scales to cover w×h (16 bits per pixel: photos have no transparency). */
-    private static Bitmap decode(byte[] data, int w, int h) {
+    static Bitmap decode(byte[] data, int w, int h) {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inPreferredConfig = Bitmap.Config.RGB_565;
         Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
@@ -263,7 +269,7 @@ final class Cards {
      * that deepens, a diagonal sheen and a light rim that fades toward the bottom. `v` is the focus spring's value.
      */
     void drawPoster(Canvas c, Title t, float x, float y, float w, float h, float v, boolean isNew) {
-        float f = Ui.clamp(v), s = 1 + 0.05f * v, rad = 18 * (w / POSTER_W) * s;
+        float f = Ui.clamp(v), s = 1 + 0.05f * v, rad = t.round ? Math.min(w, h) * s / 2 : 18 * (Math.min(w, POSTER_W) / POSTER_W) * s;
         float cx = x + w / 2, cy = y + h / 2 - 6 * v;
         r.set(cx - w * s / 2, cy - h * s / 2, cx + w * s / 2, cy + h * s / 2);
         r2.set(r);

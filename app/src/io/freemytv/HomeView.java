@@ -89,8 +89,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final String[] TABS = {"Explorar", "Seu gosto", "Filmes", "Séries"};
     private static final String[] TABS_EN = {"Explore", "Your Taste", "Movies", "Shows"};
     private static final String[] TAB_KIND = {null, Recs.MINE, "movie", "tv"};
-    /** The top row: the tabs, then the round buttons (Explore, Live TV, HDMI Inputs, Settings). */
-    private static final int NT = TABS.length, NB = 4, TOP_N = NT + NB;
+    /** The top row: the tabs, then the round buttons (Explore, Music, Live TV, HDMI Inputs, Settings). */
+    private static final int NT = TABS.length, NB = 5, TOP_N = NT + NB;
     /** The tab the home screen opens on: "Your Taste". */
     private static final int HOME_TAB = 1;
     private static final int Z_TOP = 4, Z_CARDS = 5;
@@ -392,6 +392,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void makeLightButtons() {
         lightButtons.clear();
         lightButtons.add(HomeApps.action(HomeApps.EXPLORE, "explore", Ui.tr("Explorar", "Explore"), "compass"));
+        lightButtons.add(HomeApps.action(HomeApps.MUSIC, "music", Ui.tr("Música", "Music"), "music"));
         lightButtons.add(HomeApps.action(HomeApps.LIVE_TV, "live", Ui.tr("TV aberta", "Live TV"), "live_tv"));
         lightButtons.add(HomeApps.action(HomeApps.INPUTS, "inputs", Ui.tr("Entradas HDMI", "HDMI Inputs"), "hdmi"));
         lightButtons.add(HomeApps.action(HomeApps.SETTINGS, "settings", Ui.tr("Configurações", "Settings"), "settings"));
@@ -1865,6 +1866,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             openExplore(false);
             return;
         }
+        if (it.kind == HomeApps.MUSIC) {
+            click.open();
+            activity.startActivity(new android.content.Intent(activity, MusicActivity.class));
+            return;
+        }
         click.open();
         if (it.kind == HomeApps.ALL_APPS) {
             openSheet();
@@ -2079,7 +2085,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     /**
-     * Explore, Live TV, HDMI Inputs and Settings: icon-only glass circles (light by day, smoked at night); the focused one turns
+     * Explore, Music, Live TV, HDMI Inputs and Settings: icon-only glass circles (light by day, smoked at night); the focused one turns
      * white with a dark icon (the tvOS focus) and its name appears below it.
      */
     private void drawLightButtons(Canvas c) {
