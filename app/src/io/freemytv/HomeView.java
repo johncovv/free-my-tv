@@ -86,9 +86,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final float L_TALL_W = 320, L_CARD_GAP = 40, L_BUTTON = 68, L_BUTTON_GAP = 20, L_BUTTON_CY = 103;
     private static final float L_PLATTER_TOP = 814, L_TILE_H = 126;
     private static final int L_INK = 0xFF1D1D1F, L_DIM = 0xFF6E6E73, L_FAINT = 0xFF8E8E93;
-    private static final String[] TABS = {"Explorar", "Seu gosto", "Filmes", "Séries"};
-    private static final String[] TABS_EN = {"Explore", "Your Taste", "Movies", "Shows"};
-    private static final String[] TAB_KIND = {null, Recs.MINE, "movie", "tv"};
+    private static final String[] TABS = {"Explorar", "Seu gosto", "Filmes", "Séries", "Música"};
+    private static final String[] TABS_EN = {"Explore", "Your Taste", "Movies", "Shows", "Music"};
+    private static final String[] TAB_KIND = {null, Recs.MINE, "movie", "tv", Recs.MUSIC};
     /** The top row: the tabs, then the round buttons (Explore, Music, Live TV, HDMI Inputs, Settings). */
     private static final int NT = TABS.length, NB = 5, TOP_N = NT + NB;
     /** The tab the home screen opens on: "Your Taste". */
@@ -1682,6 +1682,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
+    /** A music card: straight to the album in Spotify (or just the app, if it doesn't take the link). */
+    private void openSpotify(Recs.Pick p) {
+        android.content.Intent link = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(p.uri))
+                .setPackage(p.pkg).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            activity.startActivity(link);
+        } catch (android.content.ActivityNotFoundException e) {
+            android.content.Intent app = HomeApps.launchIntent(activity.getPackageManager(), p.pkg);
+            if (app != null) activity.startActivity(app.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        }
+    }
+
     /** The Explore screen (recommendations, new releases, genres, search); `search` opens straight on search. */
     private void openExplore(boolean search) {
         click.open();
@@ -1855,7 +1867,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             Recs.Pick p = cardIndex < cards.size() ? cards.get(cardIndex) : null;
             if (p == null) return;
             click.open();
-            DetailsActivity.open(activity, p.id, p.kind, p.title, p.backdrop, p.poster);
+            if (Recs.MUSIC.equals(p.kind)) openSpotify(p);   // music plays in Spotify; movies and shows get their page
+            else DetailsActivity.open(activity, p.id, p.kind, p.title, p.backdrop, p.poster);
             return;
         } else {
             if (shelf.isEmpty()) return;

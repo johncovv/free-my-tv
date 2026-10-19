@@ -26,7 +26,15 @@ final class Spotify {
     private String access;
     private long expiresAt;
 
-    Spotify(Context c) {
+    private static Spotify instance;
+
+    /** One per process: each token refresh replaces the refresh token, so two clients would undo each other. */
+    static synchronized Spotify get(Context c) {
+        if (instance == null) instance = new Spotify(c.getApplicationContext());
+        return instance;
+    }
+
+    private Spotify(Context c) {
         prefs = c.getSharedPreferences("spotify", Context.MODE_PRIVATE);
     }
 

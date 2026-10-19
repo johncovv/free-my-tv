@@ -100,7 +100,7 @@ final class MusicView extends View {
     MusicView(Activity a) {
         super(a);
         activity = a;
-        spotify = new Spotify(a);
+        spotify = Spotify.get(a);
         cards = new Cards(a, this::invalidate);
         click = new Click(a);
         setFocusable(true);
@@ -345,7 +345,14 @@ final class MusicView extends View {
             heroDetail = t.overview == null ? "" : android.text.TextUtils.ellipsize(t.overview, new TextPaint(detail), 1100,
                     android.text.TextUtils.TruncateAt.END).toString();
             loadCover(t);
-            Bitmap[] s = skies.get(t.backdrop);
+            Bitmap[] s = skies.get(t.poster);
+            if (s == null) {
+                Bitmap card = cards.poster(t);   // the card's copy: colors for the background right away
+                if (card != null) {
+                    s = new Bitmap[] {null, Bitmap.createScaledBitmap(card, 32, 18, true)};
+                    skies.put(t.poster, s);
+                }
+            }
             if (s != sky) {
                 skyBefore = sky;
                 sky = s;
@@ -356,13 +363,17 @@ final class MusicView extends View {
         startFrames();
     }
 
+    /**
+     * The big cover from the card's image (Spotify's ~300 px, already on disk once the card showed), not the 640 px
+     * one: it's ready almost at once. Until then the card's own copy in memory is drawn.
+     */
     private void loadCover(Title t) {
-        final String url = t.backdrop;
+        final String url = t.poster;
         if (url == null || covers.containsKey(url) || !loadingCovers.add(url)) return;
         io.execute(() -> {
             Bitmap b = null;
             try {
-                b = Cards.decode(cards.download("", url), Math.round(COVER), Math.round(COVER));
+                b = Cards.decode(cards.download("", url), Cards.SQUARE * 3 / 2, Cards.SQUARE * 3 / 2);
             } catch (Exception e) {
                 AppLog.w("cover: " + e.getMessage());
             }
@@ -373,7 +384,7 @@ final class MusicView extends View {
                 covers.put(url, done);
                 Bitmap[] s = {null, Bitmap.createScaledBitmap(done, 32, 18, true)};
                 skies.put(url, s);
-                if (hero != null && url.equals(hero.backdrop)) {
+                if (hero != null && url.equals(hero.poster)) {
                     skyBefore = sky;
                     sky = s;
                     fade.snap(0);
@@ -443,7 +454,8 @@ final class MusicView extends View {
         float x = 1920 - M - COVER, y = 60;
         r.set(x, y, x + COVER, y + COVER);
         float rad = hero.round ? COVER / 2 : 22;
-        Bitmap b = hero.backdrop == null ? null : covers.get(hero.backdrop);
+        Bitmap b = hero.poster == null ? null : covers.get(hero.poster);
+        if (b == null) b = cards.poster(hero);   // the card's copy until the sharper one is in
         sh.set(r);
         sh.offset(0, 24);
         shadow.setColor(0x8C000000);

@@ -4,6 +4,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -46,12 +49,21 @@ final class Recs {
         String title, backdrop, poster, meta = "", app, pkg;
         boolean detailed;
         boolean mine;           // from "Your Taste" (taste_titles and taste_genres), not the trending list
+        String uri;             // music: the Spotify item to open (spotify:album:…)
     }
 
     interface Listener { void onRecs(); }
 
     /** The "Your Taste" tab's kind: like the titles in taste_titles, in the genres of taste_genres. */
     static final String MINE = "mine";
+    /** The "Music" tab: from your Spotify account (recently played, and recommended: your artists' new releases and
+     *  the albums of what you've been playing). Square covers, shown whole on the cards (see compose). */
+    static final String MUSIC = "music";
+    private static final String SPOTIFY_PKG = "com.spotify.tv.android";
+    private static final long MUSIC_EVERY = 3600_000L;
+    private volatile List<Pick> musicRecent = new ArrayList<>(), musicNew = new ArrayList<>();
+    private volatile long musicAt;
+    private volatile boolean fetchingMusic;
     /** Bump when the way "Your Taste" is put together changes (the list is fetched again). */
     private static final int TASTE_VERSION = 2;
 
@@ -177,8 +189,25 @@ final class Recs {
         return at(kind, System.currentTimeMillis() / 3600_000L);
     }
 
+    /** Music's 3 for an hour: one you played recently (the big card), then two recommended; rotating hourly. */
+    private List<Pick> musicAt(long hour) {
+        List<Pick> recent = musicRecent, rec = musicNew, out = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        if (!recent.isEmpty()) {
+            Pick p = recent.get((int) (hour % recent.size()));
+            if (seen.add(p.uri)) out.add(p);
+        }
+        List<Pick> rest = rec.isEmpty() ? recent : rec;
+        for (int i = 0; i < rest.size() && out.size() < 3; i++) {
+            Pick p = rest.get((int) ((hour * 2 + i) % rest.size()));
+            if (seen.add(p.uri)) out.add(p);
+        }
+        return out;
+    }
+
     /** The 3 for a given hour (hours since 1970): the next hour's are fetched ahead, so the switch is instant. */
     private List<Pick> at(String kind, long hour) {
+        if (MUSIC.equals(kind)) return musicAt(hour);
         List<Pick> list = new ArrayList<>();
         if (!hasKey(context)) return list;    // no TMDB key: no recommendations
         boolean mine = MINE.equals(kind);
@@ -239,6 +268,7 @@ final class Recs {
 
     /** With a key: fetches the list if stale or the time of day (morning/afternoon/night) changed; then the details. */
     void refreshIfStale() {
+        refreshMusic();
         if (!hasKey(context) || fetching) return;
         long now = System.currentTimeMillis();
         // A new key, country or taste refetches.
@@ -366,7 +396,7 @@ final class Recs {
     List<Pick> wanted() {
         List<Pick> out = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
-        for (String kind : new String[] {null, MINE, "movie", "tv"}) {
+        for (String kind : new String[] {null, MINE, "movie", "tv", MUSIC}) {
             for (Pick p : now(kind)) if (seen.add(key(p))) out.add(p);
         }
         return out;
@@ -378,9 +408,119 @@ final class Recs {
         java.util.Set<String> seen = new java.util.HashSet<>();
         for (Pick p : out) seen.add(key(p));
         long next = System.currentTimeMillis() / 3600_000L + 1;
-        for (String kind : new String[] {null, MINE, "movie", "tv"}) {
+        for (String kind : new String[] {null, MINE, "movie", "tv", MUSIC}) {
             for (Pick p : at(kind, next)) if (seen.add(key(p))) out.add(p);
         }
+        return out;
+    }
+
+    /** Music, from Spotify, at most hourly (only with a Spotify login in config.properties). */
+    private void refreshMusic() {
+        long now = System.currentTimeMillis();
+        if (!Spotify.configured() || fetchingMusic || (now - musicAt < MUSIC_EVERY && now >= musicAt && !musicRecent.isEmpty())) return;
+        // Only the home screen's process: Spotify swaps the login token on each refresh, so one process uses it.
+        if (!android.app.Application.getProcessName().endsWith(":home")) return;
+        fetchingMusic = true;
+        io.execute(() -> {
+            try {
+                Spotify spotify = Spotify.get(context);
+                List<Pick> recent = new ArrayList<>(), rec = new ArrayList<>();
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                JSONArray played = spotify.get("/me/player/recently-played?limit=50").optJSONArray("items");
+                for (int i = 0; played != null && i < played.length() && recent.size() < 12; i++) {
+                    JSONObject album = played.optJSONObject(i).optJSONObject("track").optJSONObject("album");
+                    Pick p = musicPick(album, Ui.tr("Tocado recentemente", "Recently played"));
+                    if (p != null && seen.add(p.uri)) recent.add(p);
+                }
+                // Recommended: your top artists' releases of the past year, alternating with the albums of your top
+                // tracks of the last weeks (Spotify's own recommendations aren't open to apps since 2024).
+                List<Object[]> releases = new ArrayList<>();
+                Calendar cal = Calendar.getInstance();
+                cal.add(Calendar.DAY_OF_YEAR, -365);
+                String since = String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
+                JSONArray artists = spotify.get("/me/top/artists?time_range=medium_term&limit=8").optJSONArray("items");
+                for (int i = 0; artists != null && i < artists.length(); i++) {
+                    JSONArray albums = spotify.get("/artists/" + artists.optJSONObject(i).optString("id")
+                            + "/albums?include_groups=album,single&limit=5").optJSONArray("items");
+                    for (int j = 0; albums != null && j < albums.length(); j++) {
+                        JSONObject o = albums.optJSONObject(j);
+                        if (o.optString("release_date", "").compareTo(since) >= 0) {
+                            releases.add(new Object[] {o.optString("release_date"), musicPick(o, Ui.tr("Lançamento", "New release"))});
+                        }
+                    }
+                }
+                java.util.Collections.sort(releases, (x, y) -> ((String) y[0]).compareTo((String) x[0]));
+                List<Pick> fresh = new ArrayList<>(), top = new ArrayList<>();
+                for (Object[] r : releases) if (r[1] != null && seen.add(((Pick) r[1]).uri)) fresh.add((Pick) r[1]);
+                JSONArray tracks = spotify.get("/me/top/tracks?time_range=short_term&limit=30").optJSONArray("items");
+                for (int i = 0; tracks != null && i < tracks.length(); i++) {
+                    Pick p = musicPick(tracks.optJSONObject(i).optJSONObject("album"), Ui.tr("Você tem ouvido", "On repeat"));
+                    if (p != null && seen.add(p.uri)) top.add(p);
+                }
+                for (int i = 0; i < Math.max(fresh.size(), top.size()) && rec.size() < 16; i++) {
+                    if (i < fresh.size()) rec.add(fresh.get(i));
+                    if (i < top.size() && rec.size() < 16) rec.add(top.get(i));
+                }
+                musicRecent = recent;
+                musicNew = rec;
+                musicAt = System.currentTimeMillis();
+                notifyListeners();
+            } catch (Exception e) {
+                AppLog.w("music: " + e.getMessage());
+                musicAt = System.currentTimeMillis() - MUSIC_EVERY + 10 * 60_000L;   // try again in 10 min
+            } finally {
+                fetchingMusic = false;
+            }
+        });
+    }
+
+    /** An album as a music card: "Recently played · John Mayer"; the largest cover (640 px) for the card. */
+    private static Pick musicPick(JSONObject album, String label) {
+        if (album == null) return null;
+        JSONArray images = album.optJSONArray("images");
+        if (images == null || images.length() == 0) return null;
+        Pick p = new Pick();
+        p.kind = MUSIC;
+        p.uri = album.optString("uri");
+        p.id = p.uri.hashCode();
+        p.title = album.optString("name");
+        p.backdrop = images.optJSONObject(0).optString("url");
+        p.poster = p.backdrop;
+        JSONArray a = album.optJSONArray("artists");
+        List<String> names = new ArrayList<>();
+        for (int i = 0; a != null && i < a.length() && i < 2; i++) names.add(a.optJSONObject(i).optString("name"));
+        p.meta = label + " · " + String.join(", ", names);
+        p.app = "spotify";
+        p.pkg = SPOTIFY_PKG;
+        p.detailed = true;
+        return p;
+    }
+
+    /**
+     * A square cover made into a 16:9 picture for the home cards: the cover blurred and darkened behind, the cover
+     * itself in the middle (sized so both the wide card and the tall ones show it whole).
+     */
+    private static Bitmap compose(Bitmap cover) {
+        Bitmap out = Bitmap.createBitmap(Backdrop.W, Backdrop.H, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+        Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+        Bitmap tiny = Bitmap.createScaledBitmap(cover, 24, 24, true);
+        c.drawBitmap(tiny, null, new RectF(-200, -620, Backdrop.W + 200, Backdrop.H + 620), p);
+        tiny.recycle();
+        c.drawColor(0x8C000000);
+        float size = 720, left = (Backdrop.W - size) / 2, top = (Backdrop.H - size) / 2;
+        RectF r = new RectF(left, top, left + size, top + size);
+        Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);
+        shadow.setColor(0x66000000);
+        shadow.setMaskFilter(new android.graphics.BlurMaskFilter(40, android.graphics.BlurMaskFilter.Blur.NORMAL));
+        c.drawRoundRect(new RectF(r.left, r.top + 24, r.right, r.bottom + 24), 20, 20, shadow);
+        android.graphics.Path clip = new android.graphics.Path();
+        clip.addRoundRect(r, 20, 20, android.graphics.Path.Direction.CW);
+        c.save();
+        c.clipPath(clip);
+        c.drawBitmap(cover, null, r, p);
+        c.restore();
+        cover.recycle();
         return out;
     }
 
@@ -804,7 +944,8 @@ final class Recs {
         //noinspection ResultOfMethodCallIgnored
         f.getParentFile().mkdirs();
         File part = new File(f.getPath() + ".part");
-        HttpURLConnection c = (HttpURLConnection) new URL(IMAGES + p.backdrop).openConnection();
+        String url = p.backdrop.startsWith("https://") ? p.backdrop : IMAGES + p.backdrop;   // music: a full URL
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(8000);
         c.setReadTimeout(20000);
         try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(part)) {
@@ -834,15 +975,16 @@ final class Recs {
             while (bounds.outWidth / (opts.inSampleSize * 2) >= Backdrop.W) opts.inSampleSize *= 2;
             Bitmap b = BitmapFactory.decodeFile(f.getPath(), opts);
             if (b == null) throw new IOException("unreadable image");
+            if (MUSIC.equals(p.kind)) b = compose(b);
             AppLog.w("backdrop \u201c" + p.title + "\u201d: " + bounds.outWidth + "×" + bounds.outHeight);
             boolean forLight = light;
             Backdrop backdrop = Backdrop.make(b, forLight);
             if (forLight != light) return;   // the design changed midway: this one is stale
             synchronized (images) {
                 images.put(p.backdrop, backdrop);
-                // Light design: every tab's 3 cards (4 tabs), the 3 on screen while a new set waits for its images, and
+                // Light design: every tab's 3 cards (5 tabs), the 3 on screen while a new set waits for its images, and
                 // one more; fewer kept them evicting each other in a loop.
-                while (images.size() > (forLight ? 16 : 4)) images.remove(images.keySet().iterator().next());
+                while (images.size() > (forLight ? 19 : 4)) images.remove(images.keySet().iterator().next());
             }
             notifyListeners();
         } catch (IOException | RuntimeException | OutOfMemoryError e) {
@@ -854,9 +996,9 @@ final class Recs {
 
     private static void prune(File dir) {
         File[] files = dir.listFiles();
-        if (files == null || files.length <= 24) return;
+        if (files == null || files.length <= 36) return;
         Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
-        for (int i = 0; i < files.length - 24; i++) {
+        for (int i = 0; i < files.length - 36; i++) {
             //noinspection ResultOfMethodCallIgnored
             files[i].delete();
         }
