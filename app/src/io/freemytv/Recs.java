@@ -474,7 +474,7 @@ final class Recs {
         });
     }
 
-    /** An album as a music card: "Recently played · John Mayer"; the largest cover (640 px) for the card. */
+    /** An album as a music card (the artists below it); the largest cover (640 px) for the card. */
     private static Pick musicPick(JSONObject album, String label) {
         if (album == null) return null;
         JSONArray images = album.optJSONArray("images");
@@ -489,7 +489,7 @@ final class Recs {
         JSONArray a = album.optJSONArray("artists");
         List<String> names = new ArrayList<>();
         for (int i = 0; a != null && i < a.length() && i < 2; i++) names.add(a.optJSONObject(i).optString("name"));
-        p.meta = label + " · " + String.join(", ", names);
+        p.meta = String.join(", ", names);   // just the artists under the card (no "Recently played" label)
         p.app = "spotify";
         p.pkg = SPOTIFY_PKG;
         p.detailed = true;
