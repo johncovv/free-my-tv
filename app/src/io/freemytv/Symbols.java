@@ -15,7 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Material Symbols Rounded icons (Apache 2.0), rendered by tools/make_symbols.py as white PNGs in assets/symbols. Drawn
+ * Phosphor icons (MIT), rendered by tools/make_phosphor.py as white PNGs in assets/symbols. Drawn
  * like text: `pointSize` is the size of the font next to the icon, and the icon is centered on that font's cap height.
  */
 final class Symbols {

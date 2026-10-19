@@ -62,6 +62,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // them with 40 of padding (the focused icon grows 20% without touching its edge).
     private static final float SHELF_PAD = 40, TILE_GAP = 48;
     private static final float TILE_RADIUS = 22, TILE_MAX_W = 270;
+    /** Smaller than tile radius + padding (62): a full concentric curve read as too round. */
+    private static final float PLATTER_RADIUS = 40;
     // Tile focus (Apple TV style): it grows from the center and its shadow drops (it "rises" toward the viewer).
     private static final float FOCUS_GROW = 0.2f;
     // Corner capsule.
@@ -998,9 +1000,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void layoutShelf() {
         int n = shelf.size();
-        float pad = SHELF_PAD * k, gap = TILE_GAP * k, th = L_TILE_H * k;
-        float full = (CONTENT_R - MARGIN) * k;
+        float pad = SHELF_PAD * k, gap = TILE_GAP * k;
+        // The platter's outer edge lines up with the rest of the content (MARGIN to CONTENT_R); the tiles fit inside.
+        float full = (CONTENT_R - MARGIN) * k - 2 * pad;
         float tw = Math.min(TILE_MAX_W * k, (full - Math.max(0, n - 1) * gap) / Math.max(1, n));
+        float th = Math.min(L_TILE_H * k, tw * L_TILE_H / 210f);
         float width = n * tw + Math.max(0, n - 1) * gap, left = (w - width) / 2f;
         float top = L_PLATTER_TOP * k;
         platterRect.set(left - pad, top, left + width + pad, top + th + 2 * pad);
@@ -1015,7 +1019,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** Shelf layer: the glass bar and its shadow (it only changes with the background). */
     private void drawPlatter(Canvas c) {
         if (shelf.isEmpty()) return;
-        float radius = (TILE_RADIUS + SHELF_PAD) * k;
+        float radius = PLATTER_RADIUS * k;
         tmp.set(platterRect);
         tmp.offset(0, 18 * k);
         shadow.setColor(tone(0x1F000000, 0x52000000));
@@ -1027,7 +1031,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** Coin logo + price in the configured currency, in a row at the right end of the tab bar. */
     private void drawQuotes(Canvas c) {
-        float right = platterRect.isEmpty() ? CONTENT_R * k : platterRect.right - SHELF_PAD * k;
+        float right = CONTENT_R * k;
         applyTone();
         Paint text = lQuote;
         // The corner buttons' names appear in this row: the quotes fade out while one of them has focus.
