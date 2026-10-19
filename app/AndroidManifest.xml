@@ -91,9 +91,10 @@
             </intent-filter>
         </activity>
 
+        <!-- Main process, not :home: on Android 11 the dream's activity starts in the app's default process and
+             crashes (ClassCastException on DreamActivityCallback) when the service lives in another one. -->
         <service
             android:name=".Screensaver"
-            android:process=":home"
             android:exported="true"
             android:label="Free My TV"
             android:permission="android.permission.BIND_DREAM_SERVICE">

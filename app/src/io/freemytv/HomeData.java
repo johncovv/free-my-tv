@@ -227,6 +227,9 @@ final class HomeData {
      * Uses the last weather fetched (it moves ~1 min a day); without data, 6:00 and 18:00.
      */
     boolean isNight(long now) {
+        // theme in config.properties: "dark" or "light" pin the look; "auto" follows the sun.
+        if ("dark".equals(Config.THEME)) return true;
+        if ("light".equals(Config.THEME)) return false;
         long t = Shaders.timeOfDay(now, 0);
         long rise = Shaders.timeOfDay(weather.sunrise, 6 * 60 * 60_000L);
         long set = Shaders.timeOfDay(weather.sunset, 18 * 60 * 60_000L);

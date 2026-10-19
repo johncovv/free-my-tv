@@ -77,6 +77,7 @@ Everything lives in `config.properties`, created by the first build:
 | `language` | `auto` (follows the TV), `en` or `pt` | `auto` |
 | `currency` | Crypto prices in `USD`, `EUR`, `BRL`… | `USD` |
 | `temperature` | `C`, `F` or `auto` | `auto` |
+| `theme` | `auto` (follows the sunset), `dark` or `light` | `auto` |
 | `disable_assistant` | Also turn off Google Assistant | `false` |
 
 Changed something? Run `./build.sh` and install again. Keep `freemytv.keystore`: updates are signed with it.

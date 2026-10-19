@@ -1677,9 +1677,21 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             zone = Z_SHELF;
             retarget(false);
         } else {
+            startScreensaver();
             return;
         }
         click.move();
+    }
+
+    /** Back on the shelf: the screensaver now, through SystemUI's "start dreaming" activity (what Android TV uses). */
+    private void startScreensaver() {
+        try {
+            activity.startActivity(new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                    .setClassName("com.android.systemui", "com.android.systemui.Somnambulator")
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (RuntimeException e) {
+            AppLog.w("screensaver unavailable: " + e.getMessage());
+        }
     }
 
     private void move(int dx, int dy) {
