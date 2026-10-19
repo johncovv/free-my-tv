@@ -119,6 +119,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // At the top: tabs (0 to 2) and icon-only buttons (3 to 5); the three cards
     private int tab = HOME_TAB, topIndex = HOME_TAB, cardIndex;
     private List<Recs.Pick> cards = new ArrayList<>();
+    private int cardsTab = -1;          // the tab the current cards belong to
+    private long waitingSince;          // a new set of cards waiting for its images (uptime ms), or 0
     private final Spring[] topFocus = new Spring[TOP_N];
     private final RectF[] topRects = new RectF[TOP_N];
     private final Spring[] cardFocus = new Spring[3];
@@ -1890,6 +1892,22 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** The three cards of the current tab (Explore, Movies, Shows) and the background taken from the first one. */
     private void updateCards() {
         List<Recs.Pick> list = recs.now(TAB_KIND[tab]);
+        // A new set on the same tab (the hour turned, a new list) waits until its 3 images are ready, keeping the
+        // current cards meanwhile: no grey placeholders. Gives up waiting after 2 min (an image that won't load).
+        if (!samePicks(list, cards) && cardsTab == tab && !cards.isEmpty() && !list.isEmpty()) {
+            boolean ready = true;
+            for (Recs.Pick p : list) ready &= recs.ready(p);
+            long up = SystemClock.uptimeMillis();
+            if (!ready) {
+                if (waitingSince == 0) waitingSince = up;
+                if (up - waitingSince < 120_000L) {
+                    for (Recs.Pick p : recs.wanted()) recs.backdrop(p);
+                    return;
+                }
+            }
+        }
+        waitingSince = 0;
+        cardsTab = tab;
         if (!samePicks(list, cards)) {
             cards = list;
             cardIndex = Math.min(cardIndex, Math.max(0, list.size() - 1));

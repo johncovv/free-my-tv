@@ -174,6 +174,11 @@ final class Recs {
 
     /** This hour's 3, movies only ("movie") or shows only ("tv"); null = both (the home screen tabs). */
     List<Pick> now(String kind) {
+        return at(kind, System.currentTimeMillis() / 3600_000L);
+    }
+
+    /** The 3 for a given hour (hours since 1970): the next hour's are fetched ahead, so the switch is instant. */
+    private List<Pick> at(String kind, long hour) {
         List<Pick> list = new ArrayList<>();
         if (!hasKey(context)) return list;    // no TMDB key: no recommendations
         boolean mine = MINE.equals(kind);
@@ -182,7 +187,6 @@ final class Recs {
             if (!p.detailed || p.pkg != null) list.add(p);   // app missing: skip
         }
         if (list.isEmpty()) return list;
-        long hour = System.currentTimeMillis() / 3600_000L;
         // Three per hour, never two from the same franchise ("Law & Order" and "Law & Order: Special…").
         List<Pick> out = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
@@ -246,7 +250,7 @@ final class Recs {
         boolean stale = newKey || p != period || now - listAt > LIST_EVERY || now < listAt || picks.isEmpty()
                 || listEnglish != Ui.en;
         boolean missing = false;
-        for (Pick pick : wanted()) missing |= !pick.detailed || !hasImage(pick);
+        for (Pick pick : wantedSoon()) missing |= !pick.detailed || (pick.pkg != null && !hasImage(pick));
         if (!stale && !missing) return;
         keyStamp = stamp;
         fetching = true;
@@ -256,7 +260,7 @@ final class Recs {
                 // One failing title doesn't stop the others; whatever has no app on the TV is not downloaded.
                 int failures = 0, tried = 0;
                 String last = "";
-                for (Pick pick : wanted()) {
+                for (Pick pick : wantedSoon()) {
                     tried++;
                     try {
                         if (!pick.detailed) fetchDetails(pick);
@@ -358,6 +362,23 @@ final class Recs {
             for (Pick p : now(kind)) if (seen.add(key(p))) out.add(p);
         }
         return out;
+    }
+
+    /** This hour's picks and the next hour's: details and image on disk ahead of the switch. */
+    private List<Pick> wantedSoon() {
+        List<Pick> out = wanted();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (Pick p : out) seen.add(key(p));
+        long next = System.currentTimeMillis() / 3600_000L + 1;
+        for (String kind : new String[] {null, MINE, "movie", "tv"}) {
+            for (Pick p : at(kind, next)) if (seen.add(key(p))) out.add(p);
+        }
+        return out;
+    }
+
+    /** Ready to show: details in, and its image built in memory (or being built: then false, and Recs notifies). */
+    boolean ready(Pick p) {
+        return p.detailed && backdrop(p) != null;
     }
 
     /** Movies and shows are numbered separately on TMDB: a pick is identified by type + number. */
@@ -722,8 +743,9 @@ final class Recs {
             if (forLight != light) return;   // the design changed midway: this one is stale
             synchronized (images) {
                 images.put(p.backdrop, backdrop);
-                // Light design: every tab's 3 cards (4 tabs) plus one; fewer kept them evicting each other in a loop.
-                while (images.size() > (forLight ? 13 : 4)) images.remove(images.keySet().iterator().next());
+                // Light design: every tab's 3 cards (4 tabs), the 3 on screen while a new set waits for its images, and
+                // one more; fewer kept them evicting each other in a loop.
+                while (images.size() > (forLight ? 16 : 4)) images.remove(images.keySet().iterator().next());
             }
             notifyListeners();
         } catch (IOException | RuntimeException | OutOfMemoryError e) {
