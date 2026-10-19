@@ -45,9 +45,15 @@ final class Recs {
         String kind;            // "movie" or "tv"
         String title, backdrop, meta = "", app, pkg;
         boolean detailed;
+        boolean mine;           // from "Your Taste" (taste_titles and taste_genres), not the trending list
     }
 
     interface Listener { void onRecs(); }
+
+    /** The "Your Taste" tab's kind: like the titles in taste_titles, in the genres of taste_genres. */
+    static final String MINE = "mine";
+    /** Bump when the way "Your Taste" is put together changes (the list is fetched again). */
+    private static final int TASTE_VERSION = 2;
 
     private static final String API = "https://api.themoviedb.org/3";
     private static final String IMAGES = "https://image.tmdb.org/t/p/original";
@@ -170,8 +176,10 @@ final class Recs {
     List<Pick> now(String kind) {
         List<Pick> list = new ArrayList<>();
         if (!hasKey(context)) return list;    // no TMDB key: no recommendations
+        boolean mine = MINE.equals(kind);
         for (Pick p : picks) {
-            if ((kind == null || kind.equals(p.kind)) && (!p.detailed || p.pkg != null)) list.add(p);   // app missing: skip
+            if (p.mine != mine || (!mine && kind != null && !kind.equals(p.kind))) continue;
+            if (!p.detailed || p.pkg != null) list.add(p);   // app missing: skip
         }
         if (list.isEmpty()) return list;
         long hour = System.currentTimeMillis() / 3600_000L;
@@ -229,7 +237,8 @@ final class Recs {
     void refreshIfStale() {
         if (!hasKey(context) || fetching) return;
         long now = System.currentTimeMillis();
-        long stamp = Config.TMDB_KEY.hashCode() * 31L + REGION.hashCode();   // a new key or country refetches
+        // A new key, country or taste refetches.
+        long stamp = (Config.TMDB_KEY.hashCode() * 31L + REGION.hashCode()) * 31L + (TASTE_VERSION + "|" + Config.TASTE_TITLES + "|" + Config.TASTE_GENRES).hashCode();
         boolean newKey = stamp != keyStamp;
         long sinceFail = now - failedAt;    // negative = the clock went back: don't wait
         if (!newKey && failedAt != 0 && sinceFail >= 0 && sinceFail < 10 * 60_000L) return;
@@ -345,7 +354,7 @@ final class Recs {
     List<Pick> wanted() {
         List<Pick> out = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
-        for (String kind : new String[] {null, "movie", "tv"}) {
+        for (String kind : new String[] {null, MINE, "movie", "tv"}) {
             for (Pick p : now(kind)) if (seen.add(key(p))) out.add(p);
         }
         return out;
@@ -407,11 +416,120 @@ final class Recs {
         alternate(list, seen, hotMovies, hotShows, 24);
         alternate(list, seen, newMovies, newShows, 24);
         if (list.isEmpty()) throw new IOException("TMDB returned no recommendations");
+        // 3. "Your Taste": its own list, after the trending one (a failure here doesn't lose the rest).
+        try {
+            list.addAll(fetchTaste(common, seen));
+        } catch (Exception e) {
+            AppLog.w("taste: " + e.getMessage());
+        }
         picks = list;
         period = p;
         listAt = System.currentTimeMillis();
         listEnglish = Ui.en;
     }
+
+    /**
+     * "Your Taste": what TMDB recommends for each title in taste_titles (only what is on the TV's services), alternating
+     * with well-rated movies and shows in the taste_genres, up to 24. Titles already in the trending list are skipped.
+     */
+    private List<Pick> fetchTaste(String common, java.util.Set<String> seen) throws Exception {
+        List<Pick> liked = new ArrayList<>(), movies = new ArrayList<>(), shows = new ArrayList<>();
+        java.util.Set<String> seeds = new java.util.HashSet<>();
+        for (String title : Config.TASTE_TITLES.split(",")) {
+            title = title.trim();
+            if (title.isEmpty()) continue;
+            JSONArray found = get("/search/multi?language=" + lang() + "&include_adult=false&query="
+                    + URLEncoder.encode(title, "UTF-8")).getJSONArray("results");
+            for (int i = 0; i < found.length(); i++) {
+                JSONObject o = found.getJSONObject(i);
+                String kind = o.optString("media_type");
+                if (!kind.equals("movie") && !kind.equals("tv")) continue;
+                seeds.add(kind + ":" + o.optInt("id"));
+                JSONArray recs = get("/" + kind + "/" + o.optInt("id") + "/recommendations?language=" + lang())
+                        .getJSONArray("results");
+                List<Pick> candidates = new ArrayList<>();
+                for (int k = 0; k < recs.length() && k < 20; k++) add(candidates, recs.getJSONObject(k), kind);
+                for (Pick pick : candidates) {
+                    if (seeds.contains(key(pick)) || seen.contains(key(pick))) continue;
+                    try {
+                        fetchDetails(pick);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    if (pick.pkg != null) liked.add(pick);
+                }
+                break;
+            }
+        }
+        String movieGenres = genreIds(false), showGenres = genreIds(true);
+        if (!movieGenres.isEmpty()) {
+            // Well known and well rated; animation, family, comedy, horror and music only if asked for.
+            JSONArray r = get("/discover/movie?vote_average.gte=7&vote_count.gte=1500&with_genres="
+                    + URLEncoder.encode(movieGenres, "UTF-8") + "&without_genres=" + without(movieGenres, "16,10751,35,27,10402")
+                    + common).getJSONArray("results");
+            for (int i = 0; i < r.length(); i++) add(movies, r.getJSONObject(i), "movie");
+        }
+        if (!showGenres.isEmpty()) {
+            // TMDB's show genres are broad ("Sci-Fi & Fantasy" also holds horror; "Action & Adventure" police
+            // procedurals): mystery and crime are left out unless asked for, along with animation, kids, comedy and talk.
+            JSONArray r = get("/discover/tv?vote_average.gte=7.5&vote_count.gte=500&with_genres="
+                    + URLEncoder.encode(showGenres, "UTF-8") + "&without_genres="
+                    + without(showGenres, "16,10762,10751,35,9648,10764,10767,80") + common).getJSONArray("results");
+            for (int i = 0; i < r.length(); i++) add(shows, r.getJSONObject(i), "tv");
+        }
+        List<Pick> byGenre = new ArrayList<>(), out = new ArrayList<>();
+        alternate(byGenre, new java.util.HashSet<>(), movies, shows, 48);
+        java.util.Set<String> taken = new java.util.HashSet<>(seen);
+        taken.addAll(seeds);
+        // Two like the titles you love for each one from the genres.
+        for (int i = 0, j = 0; out.size() < 24 && (i < liked.size() || j < byGenre.size()); ) {
+            for (int n = 0; n < 2 && i < liked.size(); i++) if (taken.add(key(liked.get(i)))) { out.add(liked.get(i)); n++; }
+            for (int n = 0; n < 1 && j < byGenre.size(); j++) if (taken.add(key(byGenre.get(j)))) { out.add(byGenre.get(j)); n++; }
+        }
+        while (out.size() > 24) out.remove(out.size() - 1);
+        for (Pick p : out) p.mine = true;
+        return out;
+    }
+
+    /** The genres to leave out, minus the ones you asked for ("16,35" without "16" → "16" dropped). */
+    private static String without(String asked, String exclude) throws java.io.UnsupportedEncodingException {
+        java.util.Set<String> mine = new java.util.HashSet<>(java.util.Arrays.asList(asked.split("\\|")));
+        StringBuilder out = new StringBuilder();
+        for (String id : exclude.split(",")) if (!mine.contains(id)) out.append(out.length() == 0 ? "" : ",").append(id);
+        return URLEncoder.encode(out.toString(), "UTF-8");
+    }
+
+    /**
+     * taste_genres ("ficção científica, ação, guerra") as TMDB genre ids joined with "|" (any of them). Shows have
+     * their own, broader genres ("Sci-Fi & Fantasy"); a genre with no show equivalent is left out for shows.
+     */
+    private static String genreIds(boolean shows) {
+        StringBuilder out = new StringBuilder();
+        java.util.Set<Integer> added = new java.util.HashSet<>();
+        for (String name : Config.TASTE_GENRES.split(",")) {
+            String n = java.text.Normalizer.normalize(name.trim().toLowerCase(Locale.ROOT), java.text.Normalizer.Form.NFD)
+                    .replaceAll("\\p{M}", "");
+            for (String[] g : TASTE_GENRES) {
+                if (!g[0].equals(n)) continue;
+                int id = Integer.parseInt(shows ? g[2] : g[1]);
+                if (id > 0 && added.add(id)) out.append(out.length() == 0 ? "" : "|").append(id);
+            }
+        }
+        return out.toString();
+    }
+
+    /** Genre name (lowercase, no accents) → TMDB movie genre id, show genre id (0 = none for shows). */
+    private static final String[][] TASTE_GENRES = {
+        {"acao", "28", "10759"}, {"action", "28", "10759"}, {"aventura", "12", "10759"}, {"adventure", "12", "10759"},
+        {"animacao", "16", "16"}, {"animation", "16", "16"}, {"comedia", "35", "35"}, {"comedy", "35", "35"},
+        {"crime", "80", "80"}, {"documentario", "99", "99"}, {"documentary", "99", "99"}, {"drama", "18", "18"},
+        {"familia", "10751", "10751"}, {"family", "10751", "10751"}, {"fantasia", "14", "10765"}, {"fantasy", "14", "10765"},
+        {"ficcao cientifica", "878", "10765"}, {"science fiction", "878", "10765"}, {"sci-fi", "878", "10765"},
+        {"guerra", "10752", "10768"}, {"war", "10752", "10768"}, {"historia", "36", "0"}, {"history", "36", "0"},
+        {"terror", "27", "0"}, {"horror", "27", "0"}, {"misterio", "9648", "9648"}, {"mystery", "9648", "9648"},
+        {"romance", "10749", "0"}, {"suspense", "53", "0"}, {"thriller", "53", "0"}, {"faroeste", "37", "37"},
+        {"western", "37", "37"}, {"musica", "10402", "0"}, {"music", "10402", "0"},
+    };
 
     /** Language of titles and genres; the services come from the region. */
     private static String lang() {
@@ -604,7 +722,8 @@ final class Recs {
             if (forLight != light) return;   // the design changed midway: this one is stale
             synchronized (images) {
                 images.put(p.backdrop, backdrop);
-                while (images.size() > (forLight ? 10 : 4)) images.remove(images.keySet().iterator().next());
+                // Light design: every tab's 3 cards (4 tabs) plus one; fewer kept them evicting each other in a loop.
+                while (images.size() > (forLight ? 13 : 4)) images.remove(images.keySet().iterator().next());
             }
             notifyListeners();
         } catch (IOException | RuntimeException | OutOfMemoryError e) {
@@ -632,7 +751,7 @@ final class Recs {
             for (Pick p : picks) {
                 a.put(new JSONObject().put("id", p.id).put("kind", p.kind).put("title", p.title).put("backdrop", p.backdrop)
                         .put("meta", p.meta).put("app", p.app == null ? "" : p.app).put("pkg", p.pkg == null ? "" : p.pkg)
-                        .put("detailed", p.detailed));
+                        .put("detailed", p.detailed).put("mine", p.mine));
             }
             cache.edit().putString("picks", a.toString()).putInt("period", period).putLong("listAt", listAt)
                     .putBoolean("english", listEnglish)
@@ -655,6 +774,7 @@ final class Recs {
             p.app = o.optString("app").isEmpty() ? null : o.optString("app");
             p.pkg = o.optString("pkg").isEmpty() ? null : o.optString("pkg");
             p.detailed = o.optBoolean("detailed");
+            p.mine = o.optBoolean("mine");
             out.add(p);
         }
         return out;
