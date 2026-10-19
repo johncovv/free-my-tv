@@ -296,13 +296,18 @@ final class Recs {
     }
 
     /**
-     * Screensaver: the picks with an app on the TV and an image already on disk, starting with this hour's (the
-     * featured one first), never two from the same franchise.
+     * Screensaver: "Your Taste" picks with an app on the TV and an image already on disk (this hour's first), never two
+     * from the same franchise. Without any yet (no taste set, or still downloading), the trending ones as before.
      */
     List<Pick> showcase() {
         List<Pick> out = new ArrayList<>();
         if (!hasKey(context)) return out;
         java.util.Set<String> seen = new java.util.HashSet<>();
+        for (Pick p : now(MINE)) if (hasImage(p) && seen.add(franchise(p.title))) out.add(p);
+        for (Pick p : picks) {
+            if (p.mine && p.detailed && p.pkg != null && hasImage(p) && seen.add(franchise(p.title))) out.add(p);
+        }
+        if (!out.isEmpty()) return out;
         for (Pick p : wanted()) if (hasImage(p) && seen.add(franchise(p.title))) out.add(p);
         for (Pick p : picks) {
             if (p.detailed && p.pkg != null && hasImage(p) && seen.add(franchise(p.title))) out.add(p);
@@ -316,7 +321,7 @@ final class Recs {
     }
 
     /**
-     * While the screensaver is showing: details and image for every pick in the list (not just this hour's), one at a
+     * While the screensaver is showing: details and image for every "Your Taste" pick (not just this hour's), one at a
      * time in the background, so it has more photos. Not used otherwise.
      */
     void prefetchAll() {
@@ -324,7 +329,10 @@ final class Recs {
         long sinceFail = System.currentTimeMillis() - failedAt;
         if (failedAt != 0 && sinceFail >= 0 && sinceFail < 10 * 60_000L) return;
         List<Pick> todo = new ArrayList<>();
-        for (Pick p : picks) if (!p.detailed || (p.pkg != null && !hasImage(p))) todo.add(p);
+        // "Your Taste" first (what the screensaver shows); the rest only when there is no taste list.
+        boolean anyMine = false;
+        for (Pick p : picks) anyMine |= p.mine;
+        for (Pick p : picks) if ((p.mine || !anyMine) && (!p.detailed || (p.pkg != null && !hasImage(p)))) todo.add(p);
         if (todo.isEmpty()) return;
         fetching = true;
         io.execute(() -> {
