@@ -600,6 +600,40 @@ final class Recs {
         return null;
     }
 
+    /**
+     * Every subscription service a title is on in your region, as {name, HomeApps key, package}; key and package are
+     * null when the TV doesn't have that app. Then, after a {null, null, null} separator, where to rent or buy it (names).
+     */
+    List<String[]> servicesOf(JSONObject watchProviders) {
+        List<String[]> out = new ArrayList<>();
+        JSONObject results = watchProviders == null ? null : watchProviders.optJSONObject("results");
+        JSONObject here = results == null ? null : results.optJSONObject(REGION);
+        if (here == null) return out;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        JSONArray flat = here.optJSONArray("flatrate");
+        for (int i = 0; flat != null && i < flat.length(); i++) {
+            String name = flat.optJSONObject(i).optString("provider_name");
+            String[] s = service(name);
+            boolean has = s != null && installed(s[2]);
+            String shown = s != null ? SERVICE_NAME.get(s[1]) : name;
+            if (!seen.add(shown)) continue;
+            out.add(new String[] {shown, has ? s[1] : null, has ? s[2] : null});
+        }
+        List<String> other = new ArrayList<>();
+        for (String type : new String[] {"rent", "buy"}) {
+            JSONArray list = here.optJSONArray(type);
+            for (int i = 0; list != null && i < list.length(); i++) {
+                String name = list.optJSONObject(i).optString("provider_name");
+                if (seen.add(name) && !other.contains(name)) other.add(name);
+            }
+        }
+        if (!other.isEmpty()) {
+            out.add(new String[] {null, null, null});
+            for (String name : other) out.add(new String[] {name, null, null});
+        }
+        return out;
+    }
+
     static String serviceName(String appKey) {
         return appKey == null ? "" : SERVICE_NAME.get(appKey);
     }

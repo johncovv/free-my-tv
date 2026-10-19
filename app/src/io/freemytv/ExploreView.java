@@ -1,46 +1,30 @@
 package io.freemytv;
 
 import android.app.Activity;
-import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffXfermode;
-import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
-import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
+
+import io.freemytv.Cards.Title;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -55,13 +39,6 @@ import java.util.concurrent.Executors;
  * all of it goes away when the screen closes.
  */
 final class ExploreView extends View {
-    private static final class Title {
-        int id;
-        String kind, title, poster, backdrop, overview = "", meta = "", app, pkg;
-        boolean detailed;
-        StaticLayout label;   // the name, shown while the poster loads
-    }
-
     private static final class Row {
         final String title, note;
         final boolean chips, badge;
@@ -87,11 +64,10 @@ final class ExploreView extends View {
         {"Comédia", "Comedy", "35", "35"}, {"Terror", "Horror", "27", ""}, {"Animação", "Animation", "16", "16"},
         {"Documentário", "Documentary", "99", "99"}, {"Mistério", "Mystery", "9648", "9648"}, {"Família", "Family", "10751", "10751"},
     };
-    private static final String IMAGES = "https://image.tmdb.org/t/p/";
     private static final int REC = 0, NEW = 1, CHIPS = 2, GENRE = 3;
-    private static final float M = 80, POSTER_W = 196, POSTER_H = 294, STEP = 224, ROWS_TOP = 560;
-    private static final int BG = 0xFF0E0F12, INK = 0xFFF5F5F7, INK2 = 0xA3F5F5F7, INK3 = 0x6BF5F5F7;
-    private static final int GLASS = 0x14FFFFFF, GLASS2 = 0x24FFFFFF, RIM = 0x1FFFFFFF;
+    private static final float M = 80, POSTER_W = Cards.POSTER_W, POSTER_H = Cards.POSTER_H, STEP = 224, ROWS_TOP = 560;
+    private static final int BG = Cards.BG, INK = Cards.INK, INK2 = Cards.INK2, INK3 = Cards.INK3;
+    private static final int GLASS = Cards.GLASS, GLASS2 = Cards.GLASS2, RIM = Cards.RIM;
     private static final String[] KEYS = "abcdefghijklmnopqrstuvwxyz1234567890".split("");
 
     private final Activity activity;
@@ -99,22 +75,13 @@ final class ExploreView extends View {
     private final Click click;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final ExecutorService images = Executors.newFixedThreadPool(3);
+    private final Cards cards;
     private final Row[] rows = new Row[4];
     private int genre;
     private int focusRow, focusCol;   // focusRow -1 = the search box
     private final Spring scrollY = new Spring(0.34f, 0.9f, 0), grow = new Spring(0.32f, 0.78f, 0), heroFade = new Spring(0.3f, 1f, 1);
     private long lastFrame;
     private boolean destroyed, okDown, backDown;
-
-    // Images: posters by path (a few dozen, least recently drawn go first) and the hero's photos.
-    private final Map<String, Bitmap> posters = new LinkedHashMap<String, Bitmap>(64, 0.75f, true) {
-        @Override protected boolean removeEldestEntry(Map.Entry<String, Bitmap> e) { return size() > 48; }
-    };
-    private final java.util.Set<String> loadingPosters = new java.util.HashSet<>();
-    private final Map<String, Bitmap[]> photos = new LinkedHashMap<String, Bitmap[]>(8, 0.75f, true) {
-        @Override protected boolean removeEldestEntry(Map.Entry<String, Bitmap[]> e) { return size() > 6; }
-    };
 
     // Hero
     private Title hero, heroBefore;
@@ -139,23 +106,17 @@ final class ExploreView extends View {
     // Paints and scratch objects (no allocations while drawing)
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    private final Paint mask = new Paint();
-    // The home screen's shadows and focus rim (HomeView: shadowDeep, shadow, rim, sheen).
-    private final Paint softShadow = new Paint(Paint.ANTI_ALIAS_FLAG), pillShadow = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG), sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pageTitle, rowTitle, rowNote, chip, chipOn, kicker, meta, pill, badge, keyText, queryText, small, toastText;
-    private final TextPaint heroTitlePaint, overviewPaint, labelPaint;
-    private final Shader skyShade, rowsFade;
+    private final Paint pageTitle, rowTitle, rowNote, chip, chipOn, kicker, meta, pill, keyText, queryText, small, toastText;
+    private final TextPaint heroTitlePaint, overviewPaint;
+    private final Shader rowsFade;
     private final RectF r = new RectF(), r2 = new RectF();
-    private final Rect src = new Rect();
-    private final Path clip = new Path();
-    private final Shader maskH, maskV;
 
     ExploreView(Activity a, boolean startInSearch) {
         super(a);
         activity = a;
         recs = Recs.get(a);
         click = new Click(a);
+        cards = new Cards(a, this::invalidate);
         setFocusable(true);
         pageTitle = Ui.text(Ui.displaySemibold, 64, INK);
         rowTitle = Ui.text(Ui.semibold, 28, INK);
@@ -166,25 +127,14 @@ final class ExploreView extends View {
         kicker.setLetterSpacing(0.12f);
         meta = Ui.text(Ui.regular, 24, INK2);
         pill = Ui.text(Ui.semibold, 20, INK);
-        badge = Ui.text(Ui.semibold, 15, INK);
-        badge.setLetterSpacing(0.06f);
         keyText = Ui.text(Ui.medium, 28, INK);
         queryText = Ui.text(Ui.regular, 34, INK);
         small = Ui.text(Ui.medium, 26, INK2);
         toastText = Ui.text(Ui.semibold, 24, 0xFF111214);
         heroTitlePaint = new TextPaint(Ui.text(Ui.displaySemibold, 60, INK));
         overviewPaint = new TextPaint(Ui.text(Ui.regular, 22, INK2));
-        labelPaint = new TextPaint(Ui.text(Ui.medium, 22, INK2));
-        skyShade = new LinearGradient(0, 0, 0, 1080, 0x1A0A0B0E, 0xD90A0B0E, Shader.TileMode.CLAMP);
         rowsFade = new LinearGradient(0, 960, 0, 1080, 0x000A0B0E, 0xE60A0B0E, Shader.TileMode.CLAMP);
         stroke.setStyle(Paint.Style.STROKE);
-        softShadow.setMaskFilter(new android.graphics.BlurMaskFilter(30, android.graphics.BlurMaskFilter.Blur.NORMAL));
-        pillShadow.setMaskFilter(new android.graphics.BlurMaskFilter(26, android.graphics.BlurMaskFilter.Blur.NORMAL));
-        rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(2.5f);
-        mask.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
-        maskH = new LinearGradient(670, 0, 1232, 0, 0x00000000, 0xFF000000, Shader.TileMode.CLAMP);
-        maskV = new LinearGradient(0, 380, 0, 700, 0xFF000000, 0x00000000, Shader.TileMode.CLAMP);
 
         rows[REC] = new Row(Ui.tr("Recomendados para você", "Recommended for You"), Ui.tr("do seu gosto", "your taste"), false, false);
         rows[NEW] = new Row(Ui.tr("Lançamentos", "New Releases"), Ui.tr("nos seus streamings", "on your services"), false, true);
@@ -205,11 +155,9 @@ final class ExploreView extends View {
     void destroy() {
         destroyed = true;
         io.shutdownNow();
-        images.shutdownNow();
+        cards.destroy();
         main.removeCallbacksAndMessages(null);
         click.release();
-        synchronized (posters) { posters.clear(); }
-        photos.clear();
     }
 
     // MARK: - Lists
@@ -307,22 +255,10 @@ final class ExploreView extends View {
         List<Title> out = new ArrayList<>();
         JSONArray a = Recs.tmdb(path).getJSONArray("results");
         for (int i = 0; i < a.length(); i++) {
-            Title t = title(a.getJSONObject(i), kind);
+            Title t = Cards.title(a.getJSONObject(i), kind);
             if (t != null) out.add(t);
         }
         return out;
-    }
-
-    private static Title title(JSONObject o, String kind) {
-        String poster = o.optString("poster_path", ""), backdrop = o.optString("backdrop_path", "");
-        if (poster.isEmpty() || "null".equals(poster)) return null;
-        Title t = new Title();
-        t.id = o.optInt("id");
-        t.kind = kind;
-        t.title = o.optString(kind.equals("movie") ? "title" : "name");
-        t.poster = poster;
-        t.backdrop = backdrop.isEmpty() || "null".equals(backdrop) ? null : backdrop;
-        return t;
     }
 
     private static void alternate(List<Title> out, List<Title> a, List<Title> b, int max) {
@@ -358,7 +294,7 @@ final class ExploreView extends View {
             heroBefore = hero;
             heroPhotoBefore = heroPhoto;
             hero = t;
-            heroPhoto = t.backdrop == null ? null : photos.get(t.backdrop);
+            heroPhoto = cards.photo(t.backdrop, this::photoReady);
             heroFade.snap(heroPhoto != null ? 0 : 1);
             heroFade.target = 1;
             heroKicker = kickerFor(t);
@@ -378,15 +314,9 @@ final class ExploreView extends View {
 
     private void layoutHero() {
         if (hero == null) return;
-        heroTitle = layout(hero.title, heroTitlePaint, 860, 2, 1.0f);
+        heroTitle = Cards.layout(hero.title, heroTitlePaint, 860, 2, 1.0f);
         // A two-line name leaves room for two lines of synopsis (more would run into the rows).
-        heroOverview = layout(hero.overview, overviewPaint, 860, heroTitle.getLineCount() > 1 ? 2 : 3, 1.4f);
-    }
-
-    private static StaticLayout layout(String text, TextPaint p, int width, int lines, float spacing) {
-        return StaticLayout.Builder.obtain(text == null ? "" : text, 0, text == null ? 0 : text.length(), p, width)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0, spacing).setMaxLines(lines)
-                .setEllipsize(TextUtils.TruncateAt.END).build();
+        heroOverview = Cards.layout(hero.overview, overviewPaint, 860, heroTitle.getLineCount() > 1 ? 2 : 3, 1.4f);
     }
 
     /** Details for the focused title (genre, length, rating, synopsis, service) and its photo, in the background. */
@@ -438,109 +368,22 @@ final class ExploreView extends View {
     }
 
     private void loadPhoto(Title t) {
-        if (t.backdrop == null || photos.containsKey(t.backdrop)) {
-            if (t == hero && t.backdrop != null && heroPhoto == null) {
-                heroPhoto = photos.get(t.backdrop);
-                startFrames();
-            }
-            return;
-        }
-        final String path = t.backdrop;
-        images.execute(() -> {
-            Bitmap[] pair = null;
-            try {
-                Bitmap b = decode(download("w780", path), 1250, 703);
-                if (b != null) pair = new Bitmap[] {b, Bitmap.createScaledBitmap(b, 32, 18, true)};
-            } catch (Exception e) {
-                AppLog.w("explore photo: " + e.getMessage());
-            }
-            final Bitmap[] done = pair;
-            main.post(() -> {
-                if (destroyed || done == null) return;
-                photos.put(path, done);
-                if (hero != null && path.equals(hero.backdrop)) {
-                    heroPhoto = done;
-                    heroFade.snap(0);
-                    heroFade.target = 1;
-                    startFrames();
-                }
-            });
-        });
-    }
-
-    // MARK: - Posters
-
-    private Bitmap poster(Title t) {
-        Bitmap b;
-        synchronized (posters) { b = posters.get(t.poster); }
-        if (b != null || destroyed) return b;
-        final String path = t.poster;
-        synchronized (posters) { if (!loadingPosters.add(path)) return null; }
-        images.execute(() -> {
-            Bitmap done = null;
-            try {
-                done = decode(download("w342", path), Math.round(POSTER_W), Math.round(POSTER_H));
-            } catch (Exception e) {
-                AppLog.w("explore poster: " + e.getMessage());
-            }
-            final Bitmap result = done;
-            synchronized (posters) {
-                loadingPosters.remove(path);
-                if (result != null) posters.put(path, result);
-            }
-            if (result != null) main.post(this::invalidate);
-        });
-        return null;
-    }
-
-    /** The image at TMDB's `size`, from the disk cache or downloaded into it. */
-    private byte[] download(String size, String path) throws IOException {
-        File dir = new File(getContext().getCacheDir(), "explore");
-        File f = new File(dir, size + path.replace("/", "_"));
-        if (f.exists()) return readAll(new java.io.FileInputStream(f));
-        HttpURLConnection c = (HttpURLConnection) new URL(IMAGES + size + path).openConnection();
-        c.setConnectTimeout(8000);
-        c.setReadTimeout(10000);
-        try {
-            if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
-            byte[] data = readAll(c.getInputStream());
-            //noinspection ResultOfMethodCallIgnored
-            dir.mkdirs();
-            try (FileOutputStream out = new FileOutputStream(f)) {
-                out.write(data);
-            }
-            return data;
-        } finally {
-            c.disconnect();
+        Bitmap[] p = cards.photo(t.backdrop, this::photoReady);
+        if (p != null && t == hero && heroPhoto == null) {
+            heroPhoto = p;
+            startFrames();
         }
     }
 
-    private static byte[] readAll(InputStream in) throws IOException {
-        try (InputStream i = in) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[16384];
-            int n;
-            while ((n = i.read(buf)) > 0) out.write(buf, 0, n);
-            return out.toByteArray();
+    private void photoReady(String path, Bitmap[] photo) {
+        if (hero != null && path.equals(hero.backdrop)) {
+            heroPhoto = photo;
+            heroFade.snap(0);
+            heroFade.target = 1;
+            startFrames();
         }
     }
-
     /** Decodes and scales to cover w×h (16 bits per pixel: photos have no transparency). */
-    private static Bitmap decode(byte[] data, int w, int h) {
-        BitmapFactory.Options o = new BitmapFactory.Options();
-        o.inPreferredConfig = Bitmap.Config.RGB_565;
-        Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length, o);
-        if (b == null) return null;
-        float s = Math.max((float) w / b.getWidth(), (float) h / b.getHeight());
-        int sw = Math.round(b.getWidth() * s), sh = Math.round(b.getHeight() * s);
-        Bitmap scaled = Bitmap.createScaledBitmap(b, sw, sh, true);
-        if (scaled != b) b.recycle();
-        if (sw == w && sh == h) return scaled;
-        Bitmap out = Bitmap.createBitmap(scaled, (sw - w) / 2, 0, Math.min(w, sw), Math.min(h, sh));
-        if (out != scaled) scaled.recycle();
-        return out;
-    }
-
     // MARK: - Drawing
 
     private void startFrames() {
@@ -557,7 +400,7 @@ final class ExploreView extends View {
         c.drawColor(BG);
         c.save();
         c.scale(k, k);
-        drawSky(c);
+        cards.drawSky(c, heroPhoto, heroPhotoBefore, heroFade.value);
         if (searching) {
             drawSearch(c, now);
         } else {
@@ -579,34 +422,11 @@ final class ExploreView extends View {
         for (Row row : rows) moving |= row.scroll.step(dt);
         return moving;
     }
-
-    /** The focused title's photo, blurred (a 32×18 copy stretched to the screen) and darkened. */
-    private void drawSky(Canvas c) {
-        Bitmap[] now = heroPhoto, before = heroPhotoBefore;
-        float f = heroFade.value;
-        r.set(-60, -60, 1980, 1140);
-        if (before != null && f < 1) {
-            bitmapPaint.setAlpha(255);
-            c.drawBitmap(before[1], null, r, bitmapPaint);
-        }
-        if (now != null) {
-            bitmapPaint.setAlpha(Math.round(255 * (before != null ? Ui.clamp(f) : 1)));
-            c.drawBitmap(now[1], null, r, bitmapPaint);
-            bitmapPaint.setAlpha(255);
-        }
-        fill.setShader(null);
-        fill.setColor(0xC70A0B0E);
-        c.drawRect(0, 0, 1920, 1080, fill);
-        fill.setShader(skyShade);
-        c.drawRect(0, 0, 1920, 1080, fill);
-        fill.setShader(null);
-    }
-
     private void drawHero(Canvas c) {
         if (hero == null) return;
         float f = Ui.clamp(heroFade.value);
-        if (heroPhotoBefore != null && f < 1) drawPhoto(c, heroPhotoBefore[0], 1 - f);
-        if (heroPhoto != null) drawPhoto(c, heroPhoto[0], f);
+        if (heroPhotoBefore != null && f < 1) cards.drawPhoto(c, heroPhotoBefore[0], 1 - f);
+        if (heroPhoto != null) cards.drawPhoto(c, heroPhoto[0], f);
         float y = 190;
         c.drawText(heroKicker.toUpperCase(Ui.en ? Locale.US : Ui.PT), M, y + Ui.cap(kicker), kicker);
         y += 44;
@@ -638,27 +458,12 @@ final class ExploreView extends View {
             c.restore();
         }
     }
-
-    /** The photo on the right, fading out to the left and at the bottom (masked in a layer). */
-    private void drawPhoto(Canvas c, Bitmap b, float alpha) {
-        if (alpha <= 0.01f) return;
-        r.set(670, 0, 1920, 703);
-        int layer = c.saveLayerAlpha(r, Math.round(255 * Ui.clamp(alpha)));
-        c.drawBitmap(b, null, r, bitmapPaint);
-        mask.setShader(maskH);
-        c.drawRect(r, mask);
-        mask.setShader(maskV);
-        c.drawRect(r, mask);
-        mask.setShader(null);
-        c.restoreToCount(layer);
-    }
-
     private void drawSearchBox(Canvas c) {
         boolean on = focusRow == -1;
         float f = on ? Ui.clamp(grow.value) : 0;
         r.set(1920 - M - 560, 62, 1920 - M, 130);
         scale(r, 1 + 0.05f * f);
-        if (on) shadow(c, r, r.height() / 2, f);
+        if (on) cards.pillShadow(c, r, r.height() / 2, f);
         fill.setColor(on ? INK : 0x9E121318);
         c.drawRoundRect(r, r.height() / 2, r.height() / 2, fill);
         if (!on) outline(c, r, r.height() / 2);
@@ -713,10 +518,10 @@ final class ExploreView extends View {
         for (int i = 0; i < n; i++) {
             float x = x0 + i * STEP;
             if (x + POSTER_W < -40 || x > 1960 || i == focusedIndex) continue;
-            drawPoster(c, row.items.get(i), x, y, POSTER_W, POSTER_H, 0, row.badge);
+            cards.drawPoster(c, row.items.get(i), x, y, POSTER_W, POSTER_H, 0, row.badge);
         }
         if (focusedIndex >= 0 && focusedIndex < n) {
-            drawPoster(c, row.items.get(focusedIndex), x0 + focusedIndex * STEP, y, POSTER_W, POSTER_H, grow.value, row.badge);
+            cards.drawPoster(c, row.items.get(focusedIndex), x0 + focusedIndex * STEP, y, POSTER_W, POSTER_H, grow.value, row.badge);
         }
     }
 
@@ -725,58 +530,6 @@ final class ExploreView extends View {
         fill.setColor(GLASS);
         c.drawRoundRect(r, 18, 18, fill);
     }
-
-    /**
-     * A poster with the home screen's card focus (HomeView.drawLightCard): 5% larger and lifted a little, a soft shadow
-     * that deepens, a diagonal sheen and a light rim that fades toward the bottom. `v` is the focus spring's value.
-     */
-    private void drawPoster(Canvas c, Title t, float x, float y, float w, float h, float v, boolean isNew) {
-        float f = Ui.clamp(v), s = 1 + 0.05f * v, rad = 18 * (w / POSTER_W) * s;
-        float cx = x + w / 2, cy = y + h / 2 - 6 * v;
-        r.set(cx - w * s / 2, cy - h * s / 2, cx + w * s / 2, cy + h * s / 2);
-        r2.set(r);
-        r2.offset(0, 10 + 14 * f);
-        softShadow.setColor(Ui.alpha(0xFF000000, 0.32f + 0.28f * f));
-        c.drawRoundRect(r2, rad, rad, softShadow);
-        c.save();
-        clip.reset();
-        clip.addRoundRect(r, rad, rad, Path.Direction.CW);
-        c.clipPath(clip);
-        Bitmap b = poster(t);
-        if (b != null) {
-            c.drawBitmap(b, null, r, bitmapPaint);
-        } else {
-            fill.setColor(0xFF2C2C2E);
-            c.drawRect(r, fill);
-            if (t.title != null) {
-                if (t.label == null) t.label = layout(t.title, labelPaint, Math.round(POSTER_W - 24), 3, 1.1f);
-                StaticLayout l = t.label;
-                c.save();
-                c.translate(r.left + 12, r.centerY() - l.getHeight() / 2f);
-                l.draw(c);
-                c.restore();
-            }
-        }
-        if (f > 0.01f) {
-            sheen.setShader(new LinearGradient(r.left, r.top, r.left + r.width() * 0.5f, r.bottom,
-                    Ui.alpha(0xFFFFFFFF, 0.22f * f), 0x00FFFFFF, Shader.TileMode.CLAMP));
-            c.drawRect(r, sheen);
-        }
-        c.restore();
-        if (isNew) {
-            String label = Ui.tr("NOVO", "NEW");
-            r2.set(r.left + 10, r.top + 10, r.left + 10 + badge.measureText(label) + 20, r.top + 36);
-            fill.setColor(0xBF0A0A0C);
-            c.drawRoundRect(r2, 13, 13, fill);
-            c.drawText(label, r2.left + 10, r2.centerY() + Ui.halfCap(badge), badge);
-        }
-        if (f > 0.01f) {
-            rim.setShader(new LinearGradient(0, r.top, 0, r.bottom,
-                    Ui.alpha(0xFFFFFFFF, 0.9f * f), Ui.alpha(0xFFFFFFFF, 0.35f * f), Shader.TileMode.CLAMP));
-            c.drawRoundRect(r, rad, rad, rim);
-        }
-    }
-
     private void drawChips(Canvas c, float y, int focusedChip) {
         float x = M - chipsScroll(focusedChip);
         for (int i = 0; i < GENRES.length; i++) {
@@ -788,7 +541,7 @@ final class ExploreView extends View {
             if (focus) {
                 float f = Ui.clamp(grow.value);
                 scale(r, 1 + 0.05f * f);
-                shadow(c, r, r.height() / 2, f);
+                cards.pillShadow(c, r, r.height() / 2, f);
                 fill.setColor(INK);
             } else {
                 fill.setColor(on ? GLASS2 : GLASS);
@@ -844,7 +597,7 @@ final class ExploreView extends View {
             if (focus) {
                 float f = Ui.clamp(grow.value);
                 scale(r, 1 + 0.05f * f);
-                shadow(c, r, 16, f);
+                cards.pillShadow(c, r, 16, f);
                 fill.setColor(INK);
             } else {
                 fill.setColor(GLASS);
@@ -887,11 +640,11 @@ final class ExploreView extends View {
         int n = Math.min(list.size(), 12);
         for (int i = 0; i < n; i++) {
             if (inResults && i == resultFocus) continue;
-            drawPoster(c, list.get(i), x0 + (i % 4) * 184, y0 + 56 + (i / 4) * 264, 160, 240, 0, false);
+            cards.drawPoster(c, list.get(i), x0 + (i % 4) * 184, y0 + 56 + (i / 4) * 264, 160, 240, 0, false);
         }
         if (inResults && resultFocus < n) {
             int i = resultFocus;
-            drawPoster(c, list.get(i), x0 + (i % 4) * 184, y0 + 56 + (i / 4) * 264, 160, 240, grow.value, false);
+            cards.drawPoster(c, list.get(i), x0 + (i % 4) * 184, y0 + 56 + (i / 4) * 264, 160, 240, grow.value, false);
         }
         if (searchBusy) c.drawText(Ui.tr("Buscando mais…", "Searching for more…"), x0, 1040, rowNote);
     }
@@ -939,7 +692,7 @@ final class ExploreView extends View {
                     JSONObject o = found.getJSONObject(i);
                     String kind = o.optString("media_type");
                     if (!kind.equals("movie") && !kind.equals("tv")) continue;
-                    Title t = title(o, kind);
+                    Title t = Cards.title(o, kind);
                     if (t == null) continue;
                     try {
                         details(t);
@@ -990,15 +743,6 @@ final class ExploreView extends View {
         toastAt = SystemClock.uptimeMillis();
         startFrames();
     }
-
-    /** The home screen's tab focus shadow: soft, below, growing with the focus. */
-    private void shadow(Canvas c, RectF rect, float rad, float focus) {
-        r2.set(rect);
-        r2.offset(0, 8 * focus);
-        pillShadow.setColor(Ui.alpha(0xFF000000, 0.4f * focus));
-        c.drawRoundRect(r2, rad, rad, pillShadow);
-    }
-
     private void outline(Canvas c, RectF rect, float rad) {
         stroke.setColor(RIM);
         stroke.setStrokeWidth(1.5f);
@@ -1144,39 +888,10 @@ final class ExploreView extends View {
         if (focusCol < row.items.size()) open(row.items.get(focusCol));
     }
 
-    /** Opens the title's streaming app (the details say which; fetched first if they aren't in yet). */
+    /** Opens the title's page (details and where to watch it). */
     private void open(Title t) {
-        if (t.pkg == null && !t.detailed) {
-            io.execute(() -> {
-                try {
-                    details(t);
-                } catch (Exception ignored) {
-                }
-                main.post(() -> { if (!destroyed) launch(t); });
-            });
-            return;
-        }
-        launch(t);
-    }
-
-    private void launch(Title t) {
-        if (t.pkg == null) {
-            toast(Ui.tr("Não está nos seus streamings.", "Not on your streaming services."));
-            return;
-        }
-        Intent intent = HomeApps.launchIntent(activity.getPackageManager(), t.pkg);
-        if (intent == null) {
-            toast(Ui.tr("O app não está instalado.", "The app isn't installed."));
-            return;
-        }
         click.open();
-        toast(Ui.tr("Abrindo no ", "Opening in ") + Recs.serviceName(t.app) + "…");
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        try {
-            activity.startActivity(intent);
-        } catch (RuntimeException e) {
-            toast(Ui.tr("Não deu para abrir o app.", "Couldn't open the app."));
-        }
+        ((ExploreActivity) activity).openDetails(t);
     }
 
     private void back() {

@@ -12,6 +12,7 @@ import android.view.KeyEvent;
 public class ExploreActivity extends Activity {
     static final String EXTRA_SEARCH = "search";
     private ExploreView view;
+    private boolean toDetails;   // a title's page is opening on top: stay, so Back returns here
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -22,9 +23,20 @@ public class ExploreActivity extends Activity {
         getWindow().setBackgroundDrawable(null);
     }
 
+    /** Opens a title's page on top of Explore (which stays for Back). */
+    void openDetails(Cards.Title t) {
+        toDetails = true;
+        DetailsActivity.open(this, t);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        toDetails = false;
+    }
+
     @Override protected void onStop() {
         super.onStop();
-        finish();   // not kept in the background: its images go with it
+        if (!toDetails) finish();   // not kept in the background (a streaming app, Home): its images go with it
     }
 
     @Override protected void onDestroy() {
