@@ -29,6 +29,21 @@ public class ExploreActivity extends Activity {
         DetailsActivity.open(this, t);
     }
 
+    /** The TV's "Allow Free My TV to record audio?" prompt (voice search); the answer goes back to the view. */
+    void askMicrophone() {
+        toDetails = true;   // the prompt covers the screen: stay
+        requestPermissions(new String[] {android.Manifest.permission.RECORD_AUDIO}, 1);
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        if (view != null) view.micAllowed(results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
+    }
+
+    @Override protected void onPause() {
+        if (view != null) view.stopMic();   // the microphone never stays on behind another screen
+        super.onPause();
+    }
+
     @Override protected void onResume() {
         super.onResume();
         toDetails = false;

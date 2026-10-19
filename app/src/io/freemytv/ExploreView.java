@@ -1,6 +1,7 @@
 package io.freemytv;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
@@ -92,7 +93,14 @@ final class ExploreView extends View {
 
     // Search
     private boolean searching, inResults;
-    private int keyFocus, resultFocus;
+    private int keyFocus, resultFocus;   // keyFocus MIC = the microphone button in the search bar
+    private static final int MIC = -1;
+    // Voice search: OK on the microphone turns it on, OK again turns it off (it doesn't need holding). While on, what
+    // you say fills the search bar and runs the search when you pause; it keeps listening for the next search until
+    // turned off, or until ~30 s without hearing anything.
+    private android.speech.SpeechRecognizer speech;
+    private boolean listening;
+    private int silentTries;
     private final StringBuilder query = new StringBuilder();
     private final List<Title> results = new ArrayList<>();
     private boolean searchBusy;
@@ -156,6 +164,7 @@ final class ExploreView extends View {
         destroyed = true;
         io.shutdownNow();
         cards.destroy();
+        stopMic();
         main.removeCallbacksAndMessages(null);
         click.release();
     }
@@ -577,17 +586,35 @@ final class ExploreView extends View {
         magnifier(c, r.left + 52, r.centerY(), 16, INK3);
         float tx = r.left + 92, base = r.centerY() + Ui.halfCap(queryText);
         if (query.length() == 0) {
-            c.drawText(Ui.tr("Digite o nome de um filme ou série", "Type a movie or show name"), tx, base, rowNote);
+            c.drawText(listening ? Ui.tr("Ouvindo… fale o nome de um filme ou série", "Listening… say a movie or show name")
+                    : Ui.tr("Digite ou use o microfone", "Type or use the microphone"), tx, base, rowNote);
         } else {
             c.drawText(query.toString(), tx, base, queryText);
             tx += queryText.measureText(query.toString()) + 4;
         }
-        if ((now / 530) % 2 == 0 && !inResults) {
+        if ((now / 530) % 2 == 0 && !inResults && !listening) {
             fill.setColor(INK);
             c.drawRect(tx, r.centerY() - 20, tx + 3, r.centerY() + 20, fill);
         }
+        drawMic(c, r.right - 46, r.centerY(), now);
         drawKeys(c);
         drawResults(c);
+    }
+
+    /** The microphone button: glass; white when focused; red, with a slow pulse, while listening. */
+    private void drawMic(Canvas c, float cx, float cy, long now) {
+        boolean focus = !inResults && keyFocus == MIC;
+        float f = focus ? Ui.clamp(grow.value) : 0, rad = 32 * (1 + 0.05f * f);
+        r2.set(cx - rad, cy - rad, cx + rad, cy + rad);
+        if (listening) {
+            float pulse = (float) (0.5 + 0.5 * Math.sin(now / 260.0));
+            fill.setColor(Ui.alpha(0xFFE5484D, 0.25f + 0.2f * pulse));
+            c.drawCircle(cx, cy, rad + 8 + 6 * pulse, fill);
+        }
+        if (focus) cards.pillShadow(c, r2, rad, f);
+        fill.setColor(listening ? 0xFFE5484D : focus ? INK : GLASS2);
+        c.drawCircle(cx, cy, rad, fill);
+        Symbols.draw(getContext(), c, "microphone", cx, cy, 30, listening ? INK : focus ? 0xFF111214 : INK2);
     }
 
     private void drawKeys(Canvas c) {
@@ -660,10 +687,101 @@ final class ExploreView extends View {
     }
 
     private void closeSearch() {
+        stopMic();
         searching = false;
         hero = null;
         focusChanged();
         invalidate();
+    }
+
+    void startMic() {
+        if (getContext().checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            ((ExploreActivity) activity).askMicrophone();   // the TV asks once; micAllowed() continues
+            return;
+        }
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(getContext())) {
+            toast(Ui.tr("A busca por voz não está disponível nesta TV.", "Voice search isn't available on this TV."));
+            return;
+        }
+        if (speech == null) {
+            speech = android.speech.SpeechRecognizer.createSpeechRecognizer(getContext());
+            speech.setRecognitionListener(new Voice());
+        }
+        listening = true;
+        silentTries = 0;
+        listen();
+        startFrames();
+    }
+
+    void micAllowed(boolean allowed) {
+        if (allowed) startMic();
+        else toast(Ui.tr("Sem permissão para usar o microfone.", "No permission to use the microphone."));
+    }
+
+    void stopMic() {
+        listening = false;
+        if (speech != null) {
+            speech.cancel();
+            speech.destroy();
+            speech = null;
+        }
+        invalidate();
+    }
+
+    private void listen() {
+        Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, Ui.en ? "en-US" : "pt-BR")
+                .putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        speech.startListening(i);
+    }
+
+    private final class Voice implements android.speech.RecognitionListener {
+        @Override public void onPartialResults(android.os.Bundle b) {
+            String text = best(b);
+            if (text == null || !listening) return;
+            query.setLength(0);
+            query.append(text.toLowerCase(Ui.en ? Locale.US : Ui.PT));
+            invalidate();
+        }
+
+        @Override public void onResults(android.os.Bundle b) {
+            String text = best(b);
+            if (text != null) {
+                silentTries = 0;
+                query.setLength(0);
+                query.append(text.toLowerCase(Ui.en ? Locale.US : Ui.PT));
+                queryChanged();
+            }
+            if (listening && speech != null) listen();   // on until turned off: the next thing you say searches again
+        }
+
+        @Override public void onError(int error) {
+            if (!listening || speech == null) return;
+            boolean quiet = error == android.speech.SpeechRecognizer.ERROR_NO_MATCH
+                    || error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
+            if (quiet && ++silentTries < 4) {
+                listen();   // nothing heard yet: keep listening (about 30 s in all)
+                return;
+            }
+            stopMic();
+            if (!quiet) toast(Ui.tr("O microfone parou. Tente de novo.", "The microphone stopped. Try again."));
+        }
+
+        private String best(android.os.Bundle b) {
+            java.util.ArrayList<String> list = b == null ? null
+                    : b.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION);
+            return list == null || list.isEmpty() || list.get(0).trim().isEmpty() ? null : list.get(0).trim();
+        }
+
+        @Override public void onReadyForSpeech(android.os.Bundle params) {}
+        @Override public void onBeginningOfSpeech() {}
+        @Override public void onRmsChanged(float rmsdB) {}
+        @Override public void onBufferReceived(byte[] buffer) {}
+        @Override public void onEndOfSpeech() {}
+        @Override public void onEvent(int eventType, android.os.Bundle params) {}
     }
 
     private void queryChanged() {
@@ -835,11 +953,13 @@ final class ExploreView extends View {
             if (dx > 0 && col < 3 && resultFocus + 1 < n) resultFocus++;
             if (dy < 0 && resultFocus >= 4) resultFocus -= 4;
             if (dy > 0 && resultFocus + 4 < n) resultFocus += 4;
+        } else if (keyFocus == MIC) {
+            if (dy > 0) keyFocus = 9;
         } else if (keyFocus < 36) {
             int col = keyFocus % 10, line = keyFocus / 10;
             if (dx < 0 && col > 0) keyFocus--;
             if (dx > 0) { if (col == 9 || keyFocus == 35) { if (n > 0) { inResults = true; resultFocus = 0; } } else keyFocus++; }
-            if (dy < 0 && line > 0) keyFocus -= 10;
+            if (dy < 0) keyFocus = line > 0 ? keyFocus - 10 : MIC;
             if (dy > 0) keyFocus = keyFocus + 10 < 36 ? keyFocus + 10 : 36 + Math.min(2, col / 3);
         } else {
             if (dx < 0 && keyFocus > 36) keyFocus--;
@@ -860,6 +980,11 @@ final class ExploreView extends View {
             if (inResults) {
                 List<Title> list = resultList();
                 if (resultFocus < list.size()) open(list.get(resultFocus));
+                return;
+            }
+            if (keyFocus == MIC) {
+                click.open();
+                if (listening) stopMic(); else startMic();
                 return;
             }
             if (keyFocus < 36) query.append(KEYS[keyFocus]);
