@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Which screensaver service is enabled: Android 11 needs it in the main process (see Screensaver11). -->
+    <bool name="dream_in_home">false</bool>
+    <bool name="dream_in_main">true</bool>
+</resources>

@@ -143,6 +143,11 @@ final class Recs {
     void addListener(Listener l) { if (!listeners.contains(l)) listeners.add(l); }
     void removeListener(Listener l) { listeners.remove(l); }
 
+    /** How many tabs of picks the home screen has (Explore, Movies, Shows, and Your Taste and Music when set up). */
+    static int tabs() {
+        return 3 + (tasteSet() ? 1 : 0) + (Spotify.configured() ? 1 : 0);
+    }
+
     /** A taste in config.properties (taste_titles or taste_genres): the "Your Taste" tab. */
     static boolean tasteSet() {
         return !Config.TASTE_TITLES.trim().isEmpty() || !Config.TASTE_GENRES.trim().isEmpty();
@@ -423,9 +428,9 @@ final class Recs {
     /** Music, from Spotify, at most hourly (only with a Spotify login in config.properties). */
     private void refreshMusic() {
         long now = System.currentTimeMillis();
-        if (!Spotify.configured() || fetchingMusic || (now - musicAt < MUSIC_EVERY && now >= musicAt && !musicRecent.isEmpty())) return;
+        if (!Spotify.configured() || fetchingMusic || (musicAt != 0 && now - musicAt < MUSIC_EVERY && now >= musicAt)) return;
         // Only the home screen's process: Spotify swaps the login token on each refresh, so one process uses it.
-        if (!android.app.Application.getProcessName().endsWith(":home")) return;
+        if (!WRITER) return;
         fetchingMusic = true;
         io.execute(() -> {
             try {
@@ -592,11 +597,19 @@ final class Recs {
         alternate(list, seen, hotMovies, hotShows, 24);
         alternate(list, seen, newMovies, newShows, 24);
         if (list.isEmpty()) throw new IOException("TMDB returned no recommendations");
-        // 3. "Your Taste": its own list, after the trending one (a failure here doesn't lose the rest).
+        // The trending tabs go out first; then 3. "Your Taste", its own list after them (it takes many more requests,
+        // and a failure there doesn't lose the rest).
+        List<Pick> previousTaste = new ArrayList<>();
+        for (Pick old : picks) if (old.mine) previousTaste.add(old);
+        List<Pick> first = new ArrayList<>(list);
+        first.addAll(previousTaste);
+        picks = first;
+        notifyListeners();
         if (tasteSet()) try {
             list.addAll(fetchTaste(common, seen));
         } catch (Exception e) {
             AppLog.w("taste: " + e.getMessage());
+            list.addAll(previousTaste);
         }
         picks = list;
         period = p;
@@ -989,9 +1002,9 @@ final class Recs {
             if (forLight != light) return;   // the design changed midway: this one is stale
             synchronized (images) {
                 images.put(p.backdrop, backdrop);
-                // Light design: every tab's 3 cards (5 tabs), the 3 on screen while a new set waits for its images, and
-                // one more; fewer kept them evicting each other in a loop.
-                while (images.size() > (forLight ? 19 : 4)) images.remove(images.keySet().iterator().next());
+                // Light design: every tab's 3 cards, the 3 on screen while a new set waits for its images, and one
+                // more; fewer kept them evicting each other in a loop.
+                while (images.size() > (forLight ? 3 * tabs() + 4 : 4)) images.remove(images.keySet().iterator().next());
             }
             notifyListeners();
         } catch (IOException | RuntimeException | OutOfMemoryError e) {
@@ -1002,6 +1015,7 @@ final class Recs {
     }
 
     private static void prune(File dir) {
+        if (!WRITER) return;
         File[] files = dir.listFiles();
         if (files == null || files.length <= 36) return;
         Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
@@ -1013,7 +1027,14 @@ final class Recs {
 
     // MARK: - List cache
 
+    /**
+     * The home screen's process (:home) keeps the list and the images; the Android 11 screensaver, in the main process,
+     * only reads them (SharedPreferences and the image folder aren't safe to write from two processes).
+     */
+    private static final boolean WRITER = android.app.Application.getProcessName().endsWith(":home");
+
     private void save() {
+        if (!WRITER) return;
         try {
             JSONArray a = new JSONArray();
             for (Pick p : picks) {

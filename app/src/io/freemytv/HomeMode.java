@@ -36,7 +36,8 @@ final class HomeMode {
     static final String PKG = "io.freemytv";
     static final String HOME_ACTIVITY = PKG + "/" + PKG + ".HomeActivity";
     static final String SETTINGS_ACTIVITY = PKG + "/" + PKG + ".SettingsActivity";
-    static final String DREAM = PKG + "/" + PKG + ".Screensaver";
+    /** The enabled screensaver service (Screensaver11 on Android 11: see there). */
+    static final String DREAM = PKG + "/" + PKG + (Build.VERSION.SDK_INT >= 31 ? ".Screensaver" : ".Screensaver11");
     static final String FREE = "free", ORIGINAL = "original";
 
     /** Google TV's home screen: the fallback when the TV's own one wasn't recorded. */
@@ -217,11 +218,12 @@ final class HomeMode {
     }
 
     /**
-     * The package holding the home role. Android 11 has no "cmd role get-role-holders", so there it asks which
-     * activity answers the Home button instead.
+     * The package holding the home role; where "cmd role get-role-holders" is missing (Android 11, some TVs) or
+     * names no one, the package of the activity that answers the Home button.
      */
     private static String homeHolder(Adb adb) throws IOException {
-        if (Build.VERSION.SDK_INT >= 31) return adb.shell("cmd role get-role-holders --user 0 android.app.role.HOME").trim();
+        String role = adb.shell("cmd role get-role-holders --user 0 android.app.role.HOME").trim();
+        if (role.matches("[A-Za-z0-9_.]+")) return role;   // a package name (TVs without the command print an error)
         String[] lines = adb.shell("cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN"
                 + " -c android.intent.category.HOME").trim().split("\n");
         String last = lines[lines.length - 1].trim();
@@ -293,7 +295,7 @@ final class HomeMode {
                     adb.shell("cmd package set-home-activity " + HOME_ACTIVITY);
                     fixed.add(Ui.tr("o Início", "the home screen"));
                 }
-                if (!adb.shell("settings get secure screensaver_components").contains(DREAM)) {
+                if (!adb.shell("settings get secure screensaver_components").trim().equals(DREAM)) {
                     adb.shell("settings put secure screensaver_components " + DREAM);
                     fixed.add(Ui.tr("a tela de descanso", "the screensaver"));
                 }

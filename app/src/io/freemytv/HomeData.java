@@ -96,6 +96,9 @@ final class HomeData {
         final List<Boolean> hourDay = new ArrayList<>();
     }
 
+    /** Only the home screen's process (:home) saves; the Android 11 screensaver (main process) just reads. */
+    private static final boolean WRITER = android.app.Application.getProcessName().endsWith(":home");
+
     private static HomeData instance;
 
     static synchronized HomeData get(Context c) {
@@ -143,7 +146,7 @@ final class HomeData {
                     String body = fetchPrices();
                     parsePrices(body);
                     pricesAt = System.currentTimeMillis();
-                    cache.edit().putString("prices", body).putLong("pricesAt", pricesAt).apply();
+                    if (WRITER) cache.edit().putString("prices", body).putLong("pricesAt", pricesAt).apply();
                     notifyListeners();
                 } catch (Exception e) {
                     AppLog.w("prices: " + e.getMessage());
@@ -159,7 +162,10 @@ final class HomeData {
                     String body = get(WEATHER_URL);
                     weather = parseWeather(body);
                     weatherAt = System.currentTimeMillis();
-                    cache.edit().putString("weather", body).putLong("weatherAt", weatherAt).putString("weatherFor", WEATHER_URL).apply();
+                    if (WRITER) {
+                        cache.edit().putString("weather", body).putLong("weatherAt", weatherAt)
+                                .putString("weatherFor", WEATHER_URL).apply();
+                    }
                     notifyListeners();
                 } catch (Exception e) {
                     AppLog.w("weather: " + e.getMessage());
@@ -180,7 +186,10 @@ final class HomeData {
         int found = 0;
         for (int k = 0; k < COINS.length; k++) {
             JSONObject o = all.optJSONObject(COINS[k] + CURRENCY);
-            if (o == null) continue;
+            if (o == null) {
+                prices[k] = changes[k] = Double.NaN;   // not in this answer: no old number passed off as current
+                continue;
+            }
             found++;
             prices[k] = Double.parseDouble(o.optString("bid", "NaN"));
             changes[k] = Double.parseDouble(o.optString("pctChange", "NaN"));

@@ -23,15 +23,24 @@ public class ExploreActivity extends Activity {
         getWindow().setBackgroundDrawable(null);
     }
 
+    private static java.lang.ref.WeakReference<ExploreActivity> waiting;
+
     /** Opens a title's page on top of Explore (which stays for Back). */
     void openDetails(Cards.Title t) {
         toDetails = true;
+        waiting = new java.lang.ref.WeakReference<>(this);
         DetailsActivity.open(this, t);
+    }
+
+    /** The title's page was left for an app or Home (not with Back): Explore behind it goes too. */
+    static void closeBehind() {
+        ExploreActivity e = waiting == null ? null : waiting.get();
+        waiting = null;
+        if (e != null && e.toDetails && !e.isFinishing()) e.finish();
     }
 
     /** The TV's "Allow Free My TV to record audio?" prompt (voice search); the answer goes back to the view. */
     void askMicrophone() {
-        toDetails = true;   // the prompt covers the screen: stay
         requestPermissions(new String[] {android.Manifest.permission.RECORD_AUDIO}, 1);
     }
 
@@ -47,6 +56,7 @@ public class ExploreActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         toDetails = false;
+        waiting = null;
     }
 
     @Override protected void onStop() {

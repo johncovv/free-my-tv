@@ -48,7 +48,10 @@ public class DetailsActivity extends Activity {
 
     @Override protected void onStop() {
         super.onStop();
-        finish();   // gone once a streaming app opens (or Home is pressed): its images go with it
+        // Gone once a streaming app opens (or Home is pressed): its images go with it, and Explore's behind it too.
+        // With Back it's already finishing and Explore is showing again.
+        if (!isFinishing()) ExploreActivity.closeBehind();
+        finish();
     }
 
     @Override protected void onDestroy() {

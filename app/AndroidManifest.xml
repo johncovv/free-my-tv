@@ -127,10 +127,23 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection"
             android:theme="@style/FreeMyTV.Home" />
 
-        <!-- Main process, not :home: on Android 11 the dream's activity starts in the app's default process and
-             crashes (ClassCastException on DreamActivityCallback) when the service lives in another one. -->
+        <!-- The screensaver: in :home with the home screen (Android 12+), or in the main process on Android 11
+             (Screensaver11; see there). values-v31/bools.xml picks which one is enabled. -->
         <service
             android:name=".Screensaver"
+            android:process=":home"
+            android:enabled="@bool/dream_in_home"
+            android:exported="true"
+            android:label="Free My TV"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".Screensaver11"
+            android:enabled="@bool/dream_in_main"
             android:exported="true"
             android:label="Free My TV"
             android:permission="android.permission.BIND_DREAM_SERVICE">

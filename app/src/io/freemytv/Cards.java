@@ -69,7 +69,7 @@ final class Cards {
     private final Map<String, Bitmap> posters = new LinkedHashMap<String, Bitmap>(64, 0.75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<String, Bitmap> e) { return size() > 48; }
     };
-    private final Set<String> loading = new HashSet<>();
+    private final Set<String> loading = new HashSet<>(), loadingPhotos = new HashSet<>();
     private final Map<String, Bitmap[]> photos = new LinkedHashMap<String, Bitmap[]>(8, 0.75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<String, Bitmap[]> e) { return size() > 6; }
     };
@@ -160,7 +160,7 @@ final class Cards {
     Bitmap[] photo(String path, PhotoReady ready) {
         if (path == null || destroyed) return null;
         Bitmap[] p = photos.get(path);
-        if (p != null) return p;
+        if (p != null || !loadingPhotos.add(path)) return p;   // already on its way: one download per photo
         images.execute(() -> {
             Bitmap[] pair = null;
             try {
@@ -171,6 +171,7 @@ final class Cards {
             }
             final Bitmap[] done = pair;
             main.post(() -> {
+                loadingPhotos.remove(path);
                 if (destroyed || done == null) return;
                 photos.put(path, done);
                 ready.ready(path, done);
@@ -193,9 +194,13 @@ final class Cards {
             byte[] data = readAll(c.getInputStream());
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
-            try (FileOutputStream out = new FileOutputStream(f)) {
+            // Written aside and renamed: a half-written file (the screen closed mid-download) is never served.
+            File part = new File(f.getPath() + "." + Thread.currentThread().getId() + ".part");
+            try (FileOutputStream out = new FileOutputStream(part)) {
                 out.write(data);
             }
+            //noinspection ResultOfMethodCallIgnored
+            if (!part.renameTo(f)) part.delete();
             return data;
         } finally {
             c.disconnect();
