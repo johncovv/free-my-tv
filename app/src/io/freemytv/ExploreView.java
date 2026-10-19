@@ -95,12 +95,10 @@ final class ExploreView extends View {
     private boolean searching, inResults;
     private int keyFocus, resultFocus;   // keyFocus MIC = the microphone button in the search bar
     private static final int MIC = -1;
-    // Voice search: OK on the microphone turns it on, OK again turns it off (it doesn't need holding). While on, what
-    // you say fills the search bar and runs the search when you pause; it keeps listening for the next search until
-    // turned off, or until ~30 s without hearing anything.
+    // Voice search: hold OK on the microphone and speak; letting go searches what you said (it fills the bar as you
+    // speak).
     private android.speech.SpeechRecognizer speech;
     private boolean listening;
-    private int silentTries;
     private final StringBuilder query = new StringBuilder();
     private final List<Title> results = new ArrayList<>();
     private boolean searchBusy;
@@ -586,8 +584,8 @@ final class ExploreView extends View {
         magnifier(c, r.left + 52, r.centerY(), 16, INK3);
         float tx = r.left + 92, base = r.centerY() + Ui.halfCap(queryText);
         if (query.length() == 0) {
-            c.drawText(listening ? Ui.tr("Ouvindo… fale o nome de um filme ou série", "Listening… say a movie or show name")
-                    : Ui.tr("Digite ou use o microfone", "Type or use the microphone"), tx, base, rowNote);
+            c.drawText(listening ? Ui.tr("Ouvindo… solte OK quando terminar", "Listening… let go of OK when done")
+                    : Ui.tr("Digite, ou segure OK no microfone e fale", "Type, or hold OK on the microphone and speak"), tx, base, rowNote);
         } else {
             c.drawText(query.toString(), tx, base, queryText);
             tx += queryText.measureText(query.toString()) + 4;
@@ -707,15 +705,24 @@ final class ExploreView extends View {
         if (speech == null) {
             speech = android.speech.SpeechRecognizer.createSpeechRecognizer(getContext());
             speech.setRecognitionListener(new Voice());
+        } else {
+            speech.cancel();   // a new press starts over
         }
+        click.open();
         listening = true;
-        silentTries = 0;
         listen();
         startFrames();
     }
 
+    /** OK let go: stop listening; the result (what was said) comes in onResults and searches. */
+    private void releaseMic() {
+        if (speech != null && listening) speech.stopListening();
+        listening = false;
+        invalidate();
+    }
+
     void micAllowed(boolean allowed) {
-        if (allowed) startMic();
+        if (allowed) toast(Ui.tr("Pronto: segure OK no microfone e fale.", "Ready: hold OK on the microphone and speak."));
         else toast(Ui.tr("Sem permissão para usar o microfone.", "No permission to use the microphone."));
     }
 
@@ -734,14 +741,17 @@ final class ExploreView extends View {
                 .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH)
                 .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, Ui.en ? "en-US" : "pt-BR")
                 .putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                .putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                .putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                // Held: don't stop at a short pause; letting go of OK ends it.
+                .putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 10_000L)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 10_000L);
         speech.startListening(i);
     }
 
     private final class Voice implements android.speech.RecognitionListener {
         @Override public void onPartialResults(android.os.Bundle b) {
             String text = best(b);
-            if (text == null || !listening) return;
+            if (text == null || speech == null) return;
             query.setLength(0);
             query.append(text.toLowerCase(Ui.en ? Locale.US : Ui.PT));
             invalidate();
@@ -749,25 +759,26 @@ final class ExploreView extends View {
 
         @Override public void onResults(android.os.Bundle b) {
             String text = best(b);
+            listening = false;
             if (text != null) {
-                silentTries = 0;
                 query.setLength(0);
                 query.append(text.toLowerCase(Ui.en ? Locale.US : Ui.PT));
                 queryChanged();
             }
-            if (listening && speech != null) listen();   // on until turned off: the next thing you say searches again
+            invalidate();
         }
 
         @Override public void onError(int error) {
-            if (!listening || speech == null) return;
-            boolean quiet = error == android.speech.SpeechRecognizer.ERROR_NO_MATCH
-                    || error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
-            if (quiet && ++silentTries < 4) {
-                listen();   // nothing heard yet: keep listening (about 30 s in all)
-                return;
+            listening = false;
+            AppLog.w("voice: error " + error);
+            if (error == android.speech.SpeechRecognizer.ERROR_NO_MATCH || error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                toast(Ui.tr("Não ouvi nada. Segure OK e fale.", "I didn't hear anything. Hold OK and speak."));
+            } else if (error == android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                toast(Ui.tr("Sem permissão para usar o microfone.", "No permission to use the microphone."));
+            } else if (error != android.speech.SpeechRecognizer.ERROR_CLIENT) {
+                toast(Ui.tr("A busca por voz falhou. Tente de novo.", "Voice search failed. Try again."));
             }
-            stopMic();
-            if (!quiet) toast(Ui.tr("O microfone parou. Tente de novo.", "The microphone stopped. Try again."));
+            invalidate();
         }
 
         private String best(android.os.Bundle b) {
@@ -888,8 +899,16 @@ final class ExploreView extends View {
         int code = e.getKeyCode();
         // OK and Back act on release, and only if pressed here (a press from the previous screen does nothing).
         if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-            if (down) { if (e.getRepeatCount() == 0) okDown = true; }
-            else if (okDown) { okDown = false; ok(); }
+            boolean onMic = searching && !inResults && keyFocus == MIC;
+            if (down) {
+                if (e.getRepeatCount() == 0) {
+                    okDown = true;
+                    if (onMic) startMic();   // hold to talk
+                }
+            } else if (okDown) {
+                okDown = false;
+                if (onMic) releaseMic(); else ok();
+            }
             return true;
         }
         if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
@@ -980,11 +999,6 @@ final class ExploreView extends View {
             if (inResults) {
                 List<Title> list = resultList();
                 if (resultFocus < list.size()) open(list.get(resultFocus));
-                return;
-            }
-            if (keyFocus == MIC) {
-                click.open();
-                if (listening) stopMic(); else startMic();
                 return;
             }
             if (keyFocus < 36) query.append(KEYS[keyFocus]);
