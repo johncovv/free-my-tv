@@ -6,8 +6,8 @@ import android.view.KeyEvent;
 
 /**
  * The Explore screen: recommendations for you, new releases, genres and search (ExploreView). Opened from the home
- * screen (OK on the "Explore" tab, or the remote's search key). It lives only while it's on screen: leaving it closes
- * it and frees its images, so the home screen stays as light as before.
+ * screen (the compass button at the top, or the remote's search key). It lives only while it's on screen: leaving it
+ * closes it and frees its images, so the home screen stays as light as before.
  */
 public class ExploreActivity extends Activity {
     static final String EXTRA_SEARCH = "search";

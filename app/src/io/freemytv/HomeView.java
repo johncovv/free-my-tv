@@ -89,8 +89,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final String[] TABS = {"Explorar", "Seu gosto", "Filmes", "Séries"};
     private static final String[] TABS_EN = {"Explore", "Your Taste", "Movies", "Shows"};
     private static final String[] TAB_KIND = {null, Recs.MINE, "movie", "tv"};
-    /** The top row: the tabs, then the three round buttons. */
-    private static final int NT = TABS.length, TOP_N = NT + 3;
+    /** The top row: the tabs, then the round buttons (Explore, Live TV, HDMI Inputs, Settings). */
+    private static final int NT = TABS.length, NB = 4, TOP_N = NT + NB;
     /** The tab the home screen opens on: "Your Taste". */
     private static final int HOME_TAB = 1;
     private static final int Z_TOP = 4, Z_CARDS = 5;
@@ -391,6 +391,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** The three corner buttons, with their names in the current language. */
     private void makeLightButtons() {
         lightButtons.clear();
+        lightButtons.add(HomeApps.action(HomeApps.EXPLORE, "explore", Ui.tr("Explorar", "Explore"), "compass"));
         lightButtons.add(HomeApps.action(HomeApps.LIVE_TV, "live", Ui.tr("TV aberta", "Live TV"), "live_tv"));
         lightButtons.add(HomeApps.action(HomeApps.INPUTS, "inputs", Ui.tr("Entradas HDMI", "HDMI Inputs"), "hdmi"));
         lightButtons.add(HomeApps.action(HomeApps.SETTINGS, "settings", Ui.tr("Configurações", "Settings"), "settings"));
@@ -1843,7 +1844,6 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         } else if (zone == Z_TOP) {
             if (topIndex < NT) {
                 selectTab(topIndex);
-                if (topIndex == 0) openExplore(false);   // OK on "Explore": the full Explore screen
                 return;
             }
             it = lightButtons.get(topIndex - NT);
@@ -1857,6 +1857,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (shelf.isEmpty()) return;
             it = shelf.get(shelfIndex);
             r = tileRects[shelfIndex];
+        }
+        if (it.kind == HomeApps.EXPLORE) {
+            openExplore(false);
+            return;
         }
         click.open();
         if (it.kind == HomeApps.ALL_APPS) {
@@ -1892,7 +1896,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             x = topRects[i].right + 4 * k;
         }
         float b = L_BUTTON * k, right = CONTENT_R * k, cy = L_BUTTON_CY * k;
-        for (int i = 2; i >= 0; i--) {
+        for (int i = NB - 1; i >= 0; i--) {
             topRects[NT + i].set(right - b, cy - b / 2, right, cy + b / 2);
             right -= b + L_BUTTON_GAP * k;
         }
@@ -2072,12 +2076,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     /**
-     * Live TV, HDMI Inputs and Settings: icon-only glass circles (light by day, smoked at night); the focused one turns
+     * Explore, Live TV, HDMI Inputs and Settings: icon-only glass circles (light by day, smoked at night); the focused one turns
      * white with a dark icon (the tvOS focus) and its name appears below it.
      */
     private void drawLightButtons(Canvas c) {
         applyTone();
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < NB; i++) {
             RectF r = topRects[NT + i];
             float f = Ui.clamp(topFocus[NT + i].value), s = 1 + 0.1f * f, rad = r.width() / 2 * s;
             cell.set(r.centerX() - rad, r.centerY() - rad, r.centerX() + rad, r.centerY() + rad);

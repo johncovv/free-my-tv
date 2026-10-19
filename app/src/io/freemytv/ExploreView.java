@@ -103,7 +103,7 @@ final class ExploreView extends View {
     private final Row[] rows = new Row[4];
     private int genre;
     private int focusRow, focusCol;   // focusRow -1 = the search box
-    private final Spring scrollY = new Spring(0.34f, 0.9f, 0), grow = new Spring(0.22f, 0.8f, 0), heroFade = new Spring(0.3f, 1f, 1);
+    private final Spring scrollY = new Spring(0.34f, 0.9f, 0), grow = new Spring(0.32f, 0.78f, 0), heroFade = new Spring(0.3f, 1f, 1);
     private long lastFrame;
     private boolean destroyed, okDown, backDown;
 
@@ -140,6 +140,9 @@ final class ExploreView extends View {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint mask = new Paint();
+    // The home screen's shadows and focus rim (HomeView: shadowDeep, shadow, rim, sheen).
+    private final Paint softShadow = new Paint(Paint.ANTI_ALIAS_FLAG), pillShadow = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG), sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pageTitle, rowTitle, rowNote, chip, chipOn, kicker, meta, pill, badge, keyText, queryText, small, toastText;
     private final TextPaint heroTitlePaint, overviewPaint, labelPaint;
     private final Shader skyShade, rowsFade;
@@ -175,6 +178,10 @@ final class ExploreView extends View {
         skyShade = new LinearGradient(0, 0, 0, 1080, 0x1A0A0B0E, 0xD90A0B0E, Shader.TileMode.CLAMP);
         rowsFade = new LinearGradient(0, 960, 0, 1080, 0x000A0B0E, 0xE60A0B0E, Shader.TileMode.CLAMP);
         stroke.setStyle(Paint.Style.STROKE);
+        softShadow.setMaskFilter(new android.graphics.BlurMaskFilter(30, android.graphics.BlurMaskFilter.Blur.NORMAL));
+        pillShadow.setMaskFilter(new android.graphics.BlurMaskFilter(26, android.graphics.BlurMaskFilter.Blur.NORMAL));
+        rim.setStyle(Paint.Style.STROKE);
+        rim.setStrokeWidth(2.5f);
         mask.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
         maskH = new LinearGradient(670, 0, 1232, 0, 0x00000000, 0xFF000000, Shader.TileMode.CLAMP);
         maskV = new LinearGradient(0, 380, 0, 700, 0xFF000000, 0x00000000, Shader.TileMode.CLAMP);
@@ -372,7 +379,8 @@ final class ExploreView extends View {
     private void layoutHero() {
         if (hero == null) return;
         heroTitle = layout(hero.title, heroTitlePaint, 860, 2, 1.0f);
-        heroOverview = layout(hero.overview, overviewPaint, 860, 3, 1.4f);
+        // A two-line name leaves room for two lines of synopsis (more would run into the rows).
+        heroOverview = layout(hero.overview, overviewPaint, 860, heroTitle.getLineCount() > 1 ? 2 : 3, 1.4f);
     }
 
     private static StaticLayout layout(String text, TextPaint p, int width, int lines, float spacing) {
@@ -647,10 +655,10 @@ final class ExploreView extends View {
 
     private void drawSearchBox(Canvas c) {
         boolean on = focusRow == -1;
-        float s = on ? 1 + 0.04f * Ui.clamp(grow.value) : 1;
+        float f = on ? Ui.clamp(grow.value) : 0;
         r.set(1920 - M - 560, 62, 1920 - M, 130);
-        scale(r, s);
-        if (on) shadow(c, r, r.height() / 2);
+        scale(r, 1 + 0.05f * f);
+        if (on) shadow(c, r, r.height() / 2, f);
         fill.setColor(on ? INK : 0x9E121318);
         c.drawRoundRect(r, r.height() / 2, r.height() / 2, fill);
         if (!on) outline(c, r, r.height() / 2);
@@ -664,7 +672,7 @@ final class ExploreView extends View {
         float target = rowTop(Math.max(0, focusRow == GENRE ? CHIPS : focusRow));
         scrollY.target = target;
         c.save();
-        c.clipRect(0, ROWS_TOP - 24, 1920, 1080);
+        c.clipRect(0, ROWS_TOP - 8, 1920, 1080);
         float y = ROWS_TOP - scrollY.value;
         for (int i = 0; i < rows.length; i++) {
             Row row = rows[i];
@@ -708,35 +716,38 @@ final class ExploreView extends View {
             drawPoster(c, row.items.get(i), x, y, POSTER_W, POSTER_H, 0, row.badge);
         }
         if (focusedIndex >= 0 && focusedIndex < n) {
-            drawPoster(c, row.items.get(focusedIndex), x0 + focusedIndex * STEP, y, POSTER_W, POSTER_H, Ui.clamp(grow.value), row.badge);
+            drawPoster(c, row.items.get(focusedIndex), x0 + focusedIndex * STEP, y, POSTER_W, POSTER_H, grow.value, row.badge);
         }
     }
 
     private void placeholder(Canvas c, float x, float y) {
         r.set(x, y, x + POSTER_W, y + POSTER_H);
         fill.setColor(GLASS);
-        c.drawRoundRect(r, 16, 16, fill);
+        c.drawRoundRect(r, 18, 18, fill);
     }
 
-    private void drawPoster(Canvas c, Title t, float x, float y, float w, float h, float focus, boolean isNew) {
-        r.set(x, y, x + w, y + h);
-        scale(r, 1 + 0.1f * focus);
-        float rad = 16 * (w / POSTER_W);
+    /**
+     * A poster with the home screen's card focus (HomeView.drawLightCard): 5% larger and lifted a little, a soft shadow
+     * that deepens, a diagonal sheen and a light rim that fades toward the bottom. `v` is the focus spring's value.
+     */
+    private void drawPoster(Canvas c, Title t, float x, float y, float w, float h, float v, boolean isNew) {
+        float f = Ui.clamp(v), s = 1 + 0.05f * v, rad = 18 * (w / POSTER_W) * s;
+        float cx = x + w / 2, cy = y + h / 2 - 6 * v;
+        r.set(cx - w * s / 2, cy - h * s / 2, cx + w * s / 2, cy + h * s / 2);
         r2.set(r);
-        r2.offset(0, 10 + 10 * focus);
-        fill.setColor(Ui.alpha(0xFF000000, 0.35f + 0.25f * focus));
-        c.drawRoundRect(r2, rad, rad, fill);
+        r2.offset(0, 10 + 14 * f);
+        softShadow.setColor(Ui.alpha(0xFF000000, 0.32f + 0.28f * f));
+        c.drawRoundRect(r2, rad, rad, softShadow);
+        c.save();
+        clip.reset();
+        clip.addRoundRect(r, rad, rad, Path.Direction.CW);
+        c.clipPath(clip);
         Bitmap b = poster(t);
         if (b != null) {
-            c.save();
-            clip.reset();
-            clip.addRoundRect(r, rad, rad, Path.Direction.CW);
-            c.clipPath(clip);
             c.drawBitmap(b, null, r, bitmapPaint);
-            c.restore();
         } else {
-            fill.setColor(GLASS);
-            c.drawRoundRect(r, rad, rad, fill);
+            fill.setColor(0xFF2C2C2E);
+            c.drawRect(r, fill);
             if (t.title != null) {
                 if (t.label == null) t.label = layout(t.title, labelPaint, Math.round(POSTER_W - 24), 3, 1.1f);
                 StaticLayout l = t.label;
@@ -746,7 +757,12 @@ final class ExploreView extends View {
                 c.restore();
             }
         }
-        outline(c, r, rad);
+        if (f > 0.01f) {
+            sheen.setShader(new LinearGradient(r.left, r.top, r.left + r.width() * 0.5f, r.bottom,
+                    Ui.alpha(0xFFFFFFFF, 0.22f * f), 0x00FFFFFF, Shader.TileMode.CLAMP));
+            c.drawRect(r, sheen);
+        }
+        c.restore();
         if (isNew) {
             String label = Ui.tr("NOVO", "NEW");
             r2.set(r.left + 10, r.top + 10, r.left + 10 + badge.measureText(label) + 20, r.top + 36);
@@ -754,12 +770,10 @@ final class ExploreView extends View {
             c.drawRoundRect(r2, 13, 13, fill);
             c.drawText(label, r2.left + 10, r2.centerY() + Ui.halfCap(badge), badge);
         }
-        if (focus > 0.01f) {
-            stroke.setColor(Ui.alpha(INK, focus));
-            stroke.setStrokeWidth(4);
-            r2.set(r);
-            r2.inset(-4, -4);
-            c.drawRoundRect(r2, rad + 4, rad + 4, stroke);
+        if (f > 0.01f) {
+            rim.setShader(new LinearGradient(0, r.top, 0, r.bottom,
+                    Ui.alpha(0xFFFFFFFF, 0.9f * f), Ui.alpha(0xFFFFFFFF, 0.35f * f), Shader.TileMode.CLAMP));
+            c.drawRoundRect(r, rad, rad, rim);
         }
     }
 
@@ -772,8 +786,9 @@ final class ExploreView extends View {
             float w = p.measureText(name) + 60;
             r.set(x, y, x + w, y + 64);
             if (focus) {
-                scale(r, 1 + 0.06f * Ui.clamp(grow.value));
-                shadow(c, r, r.height() / 2);
+                float f = Ui.clamp(grow.value);
+                scale(r, 1 + 0.05f * f);
+                shadow(c, r, r.height() / 2, f);
                 fill.setColor(INK);
             } else {
                 fill.setColor(on ? GLASS2 : GLASS);
@@ -827,7 +842,9 @@ final class ExploreView extends View {
             keyRect(i, r);
             boolean focus = !inResults && i == keyFocus;
             if (focus) {
-                scale(r, 1.08f);
+                float f = Ui.clamp(grow.value);
+                scale(r, 1 + 0.05f * f);
+                shadow(c, r, 16, f);
                 fill.setColor(INK);
             } else {
                 fill.setColor(GLASS);
@@ -874,7 +891,7 @@ final class ExploreView extends View {
         }
         if (inResults && resultFocus < n) {
             int i = resultFocus;
-            drawPoster(c, list.get(i), x0 + (i % 4) * 184, y0 + 56 + (i / 4) * 264, 160, 240, Ui.clamp(grow.value), false);
+            drawPoster(c, list.get(i), x0 + (i % 4) * 184, y0 + 56 + (i / 4) * 264, 160, 240, grow.value, false);
         }
         if (searchBusy) c.drawText(Ui.tr("Buscando mais…", "Searching for more…"), x0, 1040, rowNote);
     }
@@ -974,11 +991,12 @@ final class ExploreView extends View {
         startFrames();
     }
 
-    private void shadow(Canvas c, RectF rect, float rad) {
+    /** The home screen's tab focus shadow: soft, below, growing with the focus. */
+    private void shadow(Canvas c, RectF rect, float rad, float focus) {
         r2.set(rect);
-        r2.offset(0, 14);
-        fill.setColor(0x73000000);
-        c.drawRoundRect(r2, rad, rad, fill);
+        r2.offset(0, 8 * focus);
+        pillShadow.setColor(Ui.alpha(0xFF000000, 0.4f * focus));
+        c.drawRoundRect(r2, rad, rad, pillShadow);
     }
 
     private void outline(Canvas c, RectF rect, float rad) {
