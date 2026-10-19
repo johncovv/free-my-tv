@@ -2,7 +2,8 @@
 
 A home screen for Google TV and Android TV that replaces the stock one, plus a settings app that switches between
 Free My TV and the TV's original home screen. A plain Android app in Java, built without Gradle by `build.sh`.
-The website (freemytv.io) is in `docs/`: static HTML, CSS and JS, no build step. A push to `main` that changes it
+The website (freemytv.io) is in `docs/`: static HTML, CSS and JS, no build step (in this fork it's the original's,
+left as it is). A push to `main` that changes it
 publishes it to GitHub Pages (`.github/workflows/pages.yml`). `docs/index.html` (English) and `docs/pt/index.html`
 (Brazilian Portuguese) are the same page in two languages, so change both; visitors from Brazil land on the
 Portuguese one by themselves, and the PT/EN switch in the menu is remembered.
@@ -11,6 +12,8 @@ The person you're helping may not be technical. Keep it short and friendly, say 
 before you do it, and let them do the taps on the TV.
 
 ## Installing it for someone
+
+`/setup` (`.claude/commands/setup.md`) runs this whole flow step by step, including the optional parts (taste, Spotify).
 
 1. **Ask** for the TV's IP address and their city, if they didn't say.
 2. **Tools:** a JDK 17+, the Android SDK command-line tools (build-tools 34+, platform android-34) and adb. Check
@@ -32,9 +35,20 @@ before you do it, and let them do the taps on the TV.
    promo apps is turned off (never uninstalled), and *Original* brings it all back. On some TVs the remote's
    shortcut buttons belong to the stock home screen (TCL: Netflix, YouTube, Prime), so they rest while Free My TV
    is on.
-8. **They switch on the TV:** *Free My TV* → *Home Screen* → *Free My TV*. The app uses the TV's own ADB on
+8. **TCL TVs** block background jobs of sideloaded apps (`callee_does't_have_OP_AUTO_START_permission` in logcat), so
+   the switch snaps back to *Original*. Before they switch: `adb shell appops set io.freemytv APP_AUTO_START allow`.
+9. **They switch on the TV:** *Free My TV* → *Home Screen* → *Free My TV*. The app uses the TV's own ADB on
    127.0.0.1 with its own key, so the TV asks once more to allow debugging. Don't switch modes from the computer.
-9. **Check:** `adb logcat -s FreeMyTV` shows what the switch did.
+10. **Check:** `adb logcat -s FreeMyTV` shows what the switch did.
+
+### Optional: taste and Spotify
+
+- **Your Taste:** `taste_titles` (titles they love) and `taste_genres` (genres, Portuguese or English). Empty = no tab.
+- **Spotify (Music screen and tab):** needs Premium. They create an app at developer.spotify.com/dashboard with the
+  Redirect URI `http://127.0.0.1:8888/callback` and *Web API*, and paste the Client ID after `spotify_client_id=`
+  themselves. Then `python3 -I tools/spotify_login.py` opens the browser; it writes `spotify_refresh_token` and prints
+  nothing secret. Never print, echo or test that token: Spotify replaces it on every use, so a test from the computer
+  logs the TV out. Rebuild and install.
 
 ## Adapting it to another TV
 
@@ -68,8 +82,15 @@ TVs that don't run Google TV or Android TV (Samsung, LG and others): the way is 
 ## The code
 
 - Java 8 language level, minSdk 30 (Android 11), targetSdk 33. No Gradle, no libraries: only the Android SDK.
+- Android 11 and 12 have no `RuntimeShader` (flat fallbacks) and no `cmd role get-role-holders` (HomeMode asks
+  `cmd package resolve-activity` instead). On 11 the screensaver must run in the main process (a `DreamService` in
+  another process crashes its `DreamActivity`).
 - The home screen is drawn by hand on one Canvas (`HomeView`); the glass and the sky are AGSL shaders (`Shaders`,
-  Android 13+, with a flat fallback for 11 and 12). Keep it at 60 fps: no allocations in `onDraw`, no work on the UI thread.
+  Android 13+, with a flat fallback for 11 and 12). Keep it at 60 fps: no allocations in `onDraw`, no work on the UI
+  thread.
+- Explore (`ExploreView`), a title's page (`DetailsView`) and Music (`MusicView`, `Spotify`) are separate activities
+  in `:home` that `finish()` when stopped, with small images (`Cards`: posters, photos and the home's card focus).
+  Keep them that way: the home screen's memory must not grow with them.
 - `HomeMode` runs every switch as a background job (`ModeJob`) in the main process; the UI is in the `:home`
   process. `Watchdog` goes back to the stock home screen after 3 crashes in 5 minutes.
 - On-screen text is bilingual, `Ui.tr("pt", "en")`: add both. Comments in English, short, only where the why
@@ -79,7 +100,8 @@ TVs that don't run Google TV or Android TV (Samsung, LG and others): the way is 
 
 ## Always
 
-- Never commit `config.properties`, `*.keystore` or any key.
+- Never commit `config.properties`, `*.keystore` or any key. Never print the TMDB key or the Spotify token. The keys
+  are built into `FreeMyTV.apk`: never share or commit an APK.
 - Never uninstall or clear the data of system apps; only `pm disable-user --user 0`, through `HomeMode`, so
   *Original* can bring it back.
 - Don't change the TV's picture, sound, network or account settings.

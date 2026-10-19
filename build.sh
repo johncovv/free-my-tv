@@ -57,6 +57,7 @@ final class Config {
     static final String CURRENCY = "$(prop currency USD)";
     static final String TEMPERATURE = "$(prop temperature auto)";
     static final String THEME = "$(prop theme auto)";
+    static final String SHELF = "$(prop shelf '')";
     static final String TASTE_TITLES = "$(prop taste_titles '')";
     static final String TASTE_GENRES = "$(prop taste_genres '')";
     static final String SPOTIFY_CLIENT_ID = "$(prop spotify_client_id '')";

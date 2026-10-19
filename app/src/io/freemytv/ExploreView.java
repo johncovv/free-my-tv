@@ -100,6 +100,7 @@ final class ExploreView extends View {
     private android.speech.SpeechRecognizer speech;
     private boolean listening;
     private final StringBuilder query = new StringBuilder();
+    private String resultsTitle = Ui.tr("Recomendados para você", "Recommended for you");
     private final List<Title> results = new ArrayList<>();
     private boolean searchBusy;
     private int searchGeneration;
@@ -111,7 +112,6 @@ final class ExploreView extends View {
 
     // Paints and scratch objects (no allocations while drawing)
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint pageTitle, rowTitle, rowNote, chip, chipOn, kicker, meta, pill, keyText, queryText, small, toastText;
     private final TextPaint heroTitlePaint, overviewPaint;
     private final Shader rowsFade;
@@ -231,7 +231,8 @@ final class ExploreView extends View {
             List<Title> out = new ArrayList<>();
             try {
                 String f = recs.servicesFilter();
-                List<Title> m = discover("/discover/movie?sort_by=popularity.desc&vote_count.gte=300&with_genres=" + GENRES[g][2] + f, "movie");
+                List<Title> m = discover("/discover/movie?sort_by=popularity.desc&vote_count.gte=300&with_genres="
+                        + GENRES[g][2] + f, "movie");
                 List<Title> s = GENRES[g][3].isEmpty() ? new ArrayList<>()
                         : discover("/discover/tv?sort_by=popularity.desc&vote_count.gte=100&with_genres=" + GENRES[g][3] + f, "tv");
                 alternate(out, m, s, 20);
@@ -278,7 +279,8 @@ final class ExploreView extends View {
     private static String day(int offset) {
         Calendar cal = Calendar.getInstance();
         cal.add(Calendar.DAY_OF_YEAR, offset);
-        return String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
+        return String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH));
     }
 
     // MARK: - The focused title (hero)
@@ -304,7 +306,7 @@ final class ExploreView extends View {
             heroPhoto = cards.photo(t.backdrop, this::photoReady);
             heroFade.snap(heroPhoto != null ? 0 : 1);
             heroFade.target = 1;
-            heroKicker = kickerFor(t);
+            heroKicker = kickerFor(t).toUpperCase(Ui.en ? Locale.US : Ui.PT);
             layoutHero();
             main.removeCallbacks(detailsLater);
             main.postDelayed(detailsLater, 180);
@@ -435,7 +437,7 @@ final class ExploreView extends View {
         if (heroPhotoBefore != null && f < 1) cards.drawPhoto(c, heroPhotoBefore[0], 1 - f);
         if (heroPhoto != null) cards.drawPhoto(c, heroPhoto[0], f);
         float y = 190;
-        c.drawText(heroKicker.toUpperCase(Ui.en ? Locale.US : Ui.PT), M, y + Ui.cap(kicker), kicker);
+        c.drawText(heroKicker, M, y + Ui.cap(kicker), kicker);
         y += 44;
         if (heroTitle != null) {
             c.save();
@@ -629,7 +631,8 @@ final class ExploreView extends View {
             }
             c.drawRoundRect(r, 16, 16, fill);
             if (!focus) outline(c, r, 16);
-            String label = i < 36 ? KEYS[i] : i == 36 ? Ui.tr("Espaço", "Space") : i == 37 ? Ui.tr("Apagar", "Delete") : Ui.tr("Limpar", "Clear");
+            String label = i < 36 ? KEYS[i] : i == 36 ? Ui.tr("Espaço", "Space")
+                    : i == 37 ? Ui.tr("Apagar", "Delete") : Ui.tr("Limpar", "Clear");
             Paint p = i < 36 ? keyText : chip;
             int color = p.getColor();
             p.setColor(focus ? 0xFF111214 : (i < 36 ? INK : INK2));
@@ -652,9 +655,7 @@ final class ExploreView extends View {
     private void drawResults(Canvas c) {
         float x0 = 1100, y0 = 200;
         String q = query.toString().trim();
-        String head = q.isEmpty() ? Ui.tr("Recomendados para você", "Recommended for you")
-                : Ui.tr("Resultados para “" + q + "”", "Results for “" + q + "”");
-        c.drawText(head, x0, y0 + Ui.cap(small), small);
+        c.drawText(resultsTitle, x0, y0 + Ui.cap(small), small);
         List<Title> list = q.isEmpty() ? rows[REC].items : results;
         if (list.isEmpty()) {
             String status = searchBusy ? Ui.tr("Buscando…", "Searching…")
@@ -796,6 +797,9 @@ final class ExploreView extends View {
     }
 
     private void queryChanged() {
+        String q = query.toString().trim();
+        resultsTitle = q.isEmpty() ? Ui.tr("Recomendados para você", "Recommended for you")
+                : Ui.tr("Resultados para “" + q + "”", "Results for “" + q + "”");
         searchGeneration++;
         results.clear();
         resultFocus = 0;
@@ -813,12 +817,19 @@ final class ExploreView extends View {
         if (q.isEmpty()) return;
         io.execute(() -> {
             try {
-                JSONArray found = Recs.tmdb("/search/multi?language=" + Recs.lang() + "&include_adult=false&query="
-                        + URLEncoder.encode(q, "UTF-8")).getJSONArray("results");
+                // Two pages, most popular first: TMDB ranks by name match, so obscure titles that start with the
+                // query ("Inter-change") would otherwise come before the ones people mean ("Interstellar").
+                List<JSONObject> found = new ArrayList<>();
+                for (int page = 1; page <= 2; page++) {
+                    JSONArray a = Recs.tmdb("/search/multi?language=" + Recs.lang() + "&include_adult=false&page=" + page
+                            + "&query=" + URLEncoder.encode(q, "UTF-8")).getJSONArray("results");
+                    for (int i = 0; i < a.length(); i++) found.add(a.getJSONObject(i));
+                }
+                java.util.Collections.sort(found, (x, y) -> Double.compare(y.optDouble("popularity"), x.optDouble("popularity")));
                 int kept = 0;
-                for (int i = 0; i < found.length() && i < 20 && kept < 12; i++) {
+                for (int i = 0; i < found.size() && i < 24 && kept < 12; i++) {
                     if (gen != searchGeneration || destroyed) return;
-                    JSONObject o = found.getJSONObject(i);
+                    JSONObject o = found.get(i);
                     String kind = o.optString("media_type");
                     if (!kind.equals("movie") && !kind.equals("tv")) continue;
                     Title t = Cards.title(o, kind);

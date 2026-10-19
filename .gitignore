@@ -9,3 +9,7 @@ out/
 
 # macOS
 .DS_Store
+
+# Claude Code: only the shared commands (/setup), never local settings
+.claude/*
+!.claude/commands/

@@ -86,13 +86,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private static final float L_TALL_W = 320, L_CARD_GAP = 40, L_BUTTON = 68, L_BUTTON_GAP = 20, L_BUTTON_CY = 103;
     private static final float L_PLATTER_TOP = 814, L_TILE_H = 126;
     private static final int L_INK = 0xFF1D1D1F, L_DIM = 0xFF6E6E73, L_FAINT = 0xFF8E8E93;
-    private static final String[] TABS = {"Explorar", "Seu gosto", "Filmes", "Séries", "Música"};
-    private static final String[] TABS_EN = {"Explore", "Your Taste", "Movies", "Shows", "Music"};
-    private static final String[] TAB_KIND = {null, Recs.MINE, "movie", "tv", Recs.MUSIC};
+    /** Explore, Movies and Shows always; "Your Taste" with a taste in config.properties, "Music" with a Spotify login. */
+    private static final String[] TAB_KIND = tabKinds();
     /** The top row: the tabs, then the round buttons (Explore, Music, Live TV, HDMI Inputs, Settings). */
-    private static final int NT = TABS.length, NB = 5, TOP_N = NT + NB;
-    /** The tab the home screen opens on: "Your Taste". */
-    private static final int HOME_TAB = 1;
+    private static final int NT = TAB_KIND.length, NB = Spotify.configured() ? 5 : 4, TOP_N = NT + NB;
+    /** The tab the home screen opens on: "Your Taste" when there is one, otherwise Explore. */
+    private static final int HOME_TAB = Math.max(0, java.util.Arrays.asList(TAB_KIND).indexOf(Recs.MINE));
     private static final int Z_TOP = 4, Z_CARDS = 5;
 
     private final Activity activity;
@@ -392,14 +391,38 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void makeLightButtons() {
         lightButtons.clear();
         lightButtons.add(HomeApps.action(HomeApps.EXPLORE, "explore", Ui.tr("Explorar", "Explore"), "compass"));
-        lightButtons.add(HomeApps.action(HomeApps.MUSIC, "music", Ui.tr("Música", "Music"), "music"));
+        if (Spotify.configured()) lightButtons.add(HomeApps.action(HomeApps.MUSIC, "music", Ui.tr("Música", "Music"), "music"));
         lightButtons.add(HomeApps.action(HomeApps.LIVE_TV, "live", Ui.tr("TV aberta", "Live TV"), "live_tv"));
         lightButtons.add(HomeApps.action(HomeApps.INPUTS, "inputs", Ui.tr("Entradas HDMI", "HDMI Inputs"), "hdmi"));
         lightButtons.add(HomeApps.action(HomeApps.SETTINGS, "settings", Ui.tr("Configurações", "Settings"), "settings"));
     }
 
+    private static String[] tabKinds() {
+        List<String> kinds = new ArrayList<>();
+        kinds.add(null);
+        if (Recs.tasteSet()) kinds.add(Recs.MINE);
+        kinds.add("movie");
+        kinds.add("tv");
+        if (Spotify.configured()) kinds.add(Recs.MUSIC);
+        return kinds.toArray(new String[0]);
+    }
+
+    private static String[] tabLabels;
+    private static boolean tabLabelsEnglish;
+
+    /** The tab names, in the TV's language (built once per language: this is called while drawing). */
     private static String[] tabs() {
-        return Ui.en ? TABS_EN : TABS;
+        if (tabLabels != null && tabLabelsEnglish == Ui.en) return tabLabels;
+        String[] out = new String[TAB_KIND.length];
+        for (int i = 0; i < out.length; i++) {
+            String k = TAB_KIND[i];
+            out[i] = k == null ? Ui.tr("Explorar", "Explore") : k.equals(Recs.MINE) ? Ui.tr("Seu gosto", "Your Taste")
+                    : k.equals("movie") ? Ui.tr("Filmes", "Movies") : k.equals("tv") ? Ui.tr("Séries", "Shows")
+                    : Ui.tr("Música", "Music");
+        }
+        tabLabelsEnglish = Ui.en;
+        tabLabels = out;
+        return out;
     }
 
     @Override public void onData() {

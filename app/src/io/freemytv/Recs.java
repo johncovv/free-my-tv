@@ -143,6 +143,11 @@ final class Recs {
     void addListener(Listener l) { if (!listeners.contains(l)) listeners.add(l); }
     void removeListener(Listener l) { listeners.remove(l); }
 
+    /** A taste in config.properties (taste_titles or taste_genres): the "Your Taste" tab. */
+    static boolean tasteSet() {
+        return !Config.TASTE_TITLES.trim().isEmpty() || !Config.TASTE_GENRES.trim().isEmpty();
+    }
+
     static boolean hasKey(Context c) {
         return !Config.TMDB_KEY.trim().isEmpty();
     }
@@ -272,7 +277,8 @@ final class Recs {
         if (!hasKey(context) || fetching) return;
         long now = System.currentTimeMillis();
         // A new key, country or taste refetches.
-        long stamp = (Config.TMDB_KEY.hashCode() * 31L + REGION.hashCode()) * 31L + (TASTE_VERSION + "|" + Config.TASTE_TITLES + "|" + Config.TASTE_GENRES).hashCode();
+        long stamp = (Config.TMDB_KEY.hashCode() * 31L + REGION.hashCode()) * 31L
+                + (TASTE_VERSION + "|" + Config.TASTE_TITLES + "|" + Config.TASTE_GENRES).hashCode();
         boolean newKey = stamp != keyStamp;
         long sinceFail = now - failedAt;    // negative = the clock went back: don't wait
         if (!newKey && failedAt != 0 && sinceFail >= 0 && sinceFail < 10 * 60_000L) return;
@@ -437,7 +443,8 @@ final class Recs {
                 List<Object[]> releases = new ArrayList<>();
                 Calendar cal = Calendar.getInstance();
                 cal.add(Calendar.DAY_OF_YEAR, -365);
-                String since = String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
+                String since = String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR),
+                        cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
                 JSONArray artists = spotify.get("/me/top/artists?time_range=medium_term&limit=8").optJSONArray("items");
                 for (int i = 0; artists != null && i < artists.length(); i++) {
                     JSONArray albums = spotify.get("/artists/" + artists.optJSONObject(i).optString("id")
@@ -586,7 +593,7 @@ final class Recs {
         alternate(list, seen, newMovies, newShows, 24);
         if (list.isEmpty()) throw new IOException("TMDB returned no recommendations");
         // 3. "Your Taste": its own list, after the trending one (a failure here doesn't lose the rest).
-        try {
+        if (tasteSet()) try {
             list.addAll(fetchTaste(common, seen));
         } catch (Exception e) {
             AppLog.w("taste: " + e.getMessage());
@@ -1010,7 +1017,8 @@ final class Recs {
         try {
             JSONArray a = new JSONArray();
             for (Pick p : picks) {
-                a.put(new JSONObject().put("id", p.id).put("kind", p.kind).put("title", p.title).put("backdrop", p.backdrop).put("poster", p.poster == null ? "" : p.poster)
+                a.put(new JSONObject().put("id", p.id).put("kind", p.kind).put("title", p.title).put("backdrop", p.backdrop)
+                        .put("poster", p.poster == null ? "" : p.poster)
                         .put("meta", p.meta).put("app", p.app == null ? "" : p.app).put("pkg", p.pkg == null ? "" : p.pkg)
                         .put("detailed", p.detailed).put("mine", p.mine));
             }

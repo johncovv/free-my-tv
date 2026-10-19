@@ -221,8 +221,7 @@ final class HomeMode {
      * activity answers the Home button instead.
      */
     private static String homeHolder(Adb adb) throws IOException {
-        String holder = adb.shell("cmd role get-role-holders --user 0 android.app.role.HOME").trim();
-        if (Build.VERSION.SDK_INT >= 31) return holder;
+        if (Build.VERSION.SDK_INT >= 31) return adb.shell("cmd role get-role-holders --user 0 android.app.role.HOME").trim();
         String[] lines = adb.shell("cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN"
                 + " -c android.intent.category.HOME").trim().split("\n");
         String last = lines[lines.length - 1].trim();

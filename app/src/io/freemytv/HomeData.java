@@ -6,6 +6,7 @@ import android.os.Handler;
 import android.os.Looper;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -61,10 +62,26 @@ final class HomeData {
         return out.toArray(new String[0]);
     }
 
-    private static String pricesUrl() {
-        StringBuilder pairs = new StringBuilder();
-        for (int i = 0; i < COINS.length; i++) pairs.append(i == 0 ? "" : ",").append(COINS[i]).append('-').append(CURRENCY);
-        return "https://economia.awesomeapi.com.br/json/last/" + pairs;
+    /**
+     * One request per pair: AwesomeAPI rejects a whole batch when one pair doesn't exist (GBP-CAD, say), so a currency
+     * it only partly covers still shows what it has. Returns {"USDBRL": {...}, ...} like a batch would.
+     */
+    private static String fetchPrices() throws IOException, JSONException {
+        JSONObject all = new JSONObject();
+        for (String coin : COINS) {
+            try {
+                JSONObject one = new JSONObject(get("https://economia.awesomeapi.com.br/json/last/" + coin + "-" + CURRENCY));
+                java.util.Iterator<String> keys = one.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    all.put(key, one.get(key));
+                }
+            } catch (IOException e) {
+                AppLog.w("no " + coin + "-" + CURRENCY + " rate: " + e.getMessage());
+            }
+        }
+        if (all.length() == 0) throw new IOException("no exchange rates for " + CURRENCY);
+        return all.toString();
     }
 
     static final class Weather {
@@ -107,6 +124,8 @@ final class HomeData {
             String w = cache.getString("weather", null);
             if (w != null) weather = parseWeather(w);
             weatherAt = cache.getLong("weatherAt", 0);
+            // Saved for another place (the city changed in config.properties): fetch again right away.
+            if (!WEATHER_URL.equals(cache.getString("weatherFor", WEATHER_URL))) weatherAt = 0;
         } catch (Exception ignored) {}
     }
 
@@ -121,7 +140,7 @@ final class HomeData {
             fetchingPrices = true;
             io.execute(() -> {
                 try {
-                    String body = get(pricesUrl());
+                    String body = fetchPrices();
                     parsePrices(body);
                     pricesAt = System.currentTimeMillis();
                     cache.edit().putString("prices", body).putLong("pricesAt", pricesAt).apply();
@@ -140,7 +159,7 @@ final class HomeData {
                     String body = get(WEATHER_URL);
                     weather = parseWeather(body);
                     weatherAt = System.currentTimeMillis();
-                    cache.edit().putString("weather", body).putLong("weatherAt", weatherAt).apply();
+                    cache.edit().putString("weather", body).putLong("weatherAt", weatherAt).putString("weatherFor", WEATHER_URL).apply();
                     notifyListeners();
                 } catch (Exception e) {
                     AppLog.w("weather: " + e.getMessage());

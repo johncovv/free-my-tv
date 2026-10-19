@@ -323,7 +323,8 @@ final class MusicView extends View {
     private static String day(int offset) {
         Calendar cal = Calendar.getInstance();
         cal.add(Calendar.DAY_OF_YEAR, offset);
-        return String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
+        return String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH));
     }
 
     // MARK: - Focus and the big cover
@@ -340,7 +341,7 @@ final class MusicView extends View {
         if (t == null && hero == null) for (Row x : rows) if (!x.items.isEmpty()) { t = x.items.get(0); break; }
         if (t != null && t != hero) {
             hero = t;
-            kicker = rows[row].items.contains(t) ? rows[row].title : "";
+            kicker = rows[row].items.contains(t) ? rows[row].title.toUpperCase(Ui.en ? Locale.US : Ui.PT) : "";
             heroName = Cards.layout(t.title, namePaint, 1120, 2, 1.0f);
             heroDetail = t.overview == null ? "" : android.text.TextUtils.ellipsize(t.overview, new TextPaint(detail), 1100,
                     android.text.TextUtils.TruncateAt.END).toString();
@@ -430,12 +431,15 @@ final class MusicView extends View {
     private void drawConnect(Canvas c) {
         c.drawText(Ui.tr("Música", "Music"), M, 58 + Ui.cap(pageTitle), pageTitle);
         float y = 260;
-        c.drawText(Ui.tr("Conecte sua conta do Spotify (precisa de Premium):", "Connect your Spotify account (needs Premium):"), M, y, helpBold);
+        c.drawText(Ui.tr("Conecte sua conta do Spotify (precisa de Premium):", "Connect your Spotify account (needs Premium):"),
+                M, y, helpBold);
         String[] steps = {
             Ui.tr("1. Em developer.spotify.com/dashboard, crie um app com o Redirect URI http://127.0.0.1:8888/callback",
                     "1. At developer.spotify.com/dashboard, create an app with the Redirect URI http://127.0.0.1:8888/callback"),
-            Ui.tr("2. Cole o Client ID em config.properties: spotify_client_id=…", "2. Paste its Client ID in config.properties: spotify_client_id=…"),
-            Ui.tr("3. No computador: python3 -I tools/spotify_login.py e autorize no navegador", "3. On the computer: python3 -I tools/spotify_login.py and authorize in the browser"),
+            Ui.tr("2. Cole o Client ID em config.properties: spotify_client_id=…",
+                    "2. Paste its Client ID in config.properties: spotify_client_id=…"),
+            Ui.tr("3. No computador: python3 -I tools/spotify_login.py e autorize no navegador",
+                    "3. On the computer: python3 -I tools/spotify_login.py and authorize in the browser"),
             Ui.tr("4. ./build.sh e instale de novo", "4. ./build.sh and install again"),
         };
         for (String s : steps) {
@@ -447,7 +451,9 @@ final class MusicView extends View {
     private void drawHero(Canvas c) {
         c.drawText(Ui.tr("Música", "Music"), M, 58 + Ui.cap(pageTitle), pageTitle);
         if (hero == null) {
-            if (rows[RECENT].loading) c.drawText(Ui.tr("Carregando sua conta do Spotify…", "Loading your Spotify account…"), M, 260, note);
+            if (rows[RECENT].loading) {
+                c.drawText(Ui.tr("Carregando sua conta do Spotify…", "Loading your Spotify account…"), M, 260, note);
+            }
             return;
         }
         // The big cover on the right (a circle for artists), with a soft shadow.
@@ -472,7 +478,7 @@ final class MusicView extends View {
             c.drawRoundRect(r, rad, rad, fill);
         }
         float ty = 200;
-        if (!kicker.isEmpty()) c.drawText(kicker.toUpperCase(Ui.en ? Locale.US : Ui.PT), M, ty + Ui.cap(kickerPaint), kickerPaint);
+        if (!kicker.isEmpty()) c.drawText(kicker, M, ty + Ui.cap(kickerPaint), kickerPaint);
         ty += 44;
         c.save();
         c.translate(M, ty);

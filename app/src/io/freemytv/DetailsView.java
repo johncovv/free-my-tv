@@ -111,7 +111,7 @@ final class DetailsView extends View {
         title = t;
         final int gen = ++generation;
         loading = true;
-        kicker = t.kind.equals("movie") ? Ui.tr("Filme", "Movie") : Ui.tr("Série", "Series");
+        kicker = (t.kind.equals("movie") ? Ui.tr("Filme", "Movie") : Ui.tr("Série", "Series")).toUpperCase(Ui.en ? Locale.US : Ui.PT);
         tagline = meta = direction = cast = others = "";
         services.clear();
         similar.clear();
@@ -157,7 +157,7 @@ final class DetailsView extends View {
             int seasons = o.optInt("number_of_seasons");
             if (seasons > 0) k.add(seasons == 1 ? Ui.tr("1 temporada", "1 season") : seasons + Ui.tr(" temporadas", " seasons"));
         }
-        kicker = String.join("  ·  ", k);
+        kicker = String.join("  ·  ", k).toUpperCase(Ui.en ? Locale.US : Ui.PT);
         tagline = o.optString("tagline", "");
         // Year · length · genres · rating (votes).
         List<String> m = new ArrayList<>();
@@ -172,7 +172,9 @@ final class DetailsView extends View {
         if (minutes > 0) m.add((movie ? "" : Ui.tr("episódios de ", "episodes of ")) + duration(minutes));
         JSONArray genres = o.optJSONArray("genres");
         List<String> g = new ArrayList<>();
-        for (int i = 0; genres != null && i < genres.length() && i < 3; i++) g.add(Recs.genreName(genres.optJSONObject(i).optString("name")));
+        for (int i = 0; genres != null && i < genres.length() && i < 3; i++) {
+            g.add(Recs.genreName(genres.optJSONObject(i).optString("name")));
+        }
         if (!g.isEmpty()) m.add(String.join(", ", g));
         double vote = o.optDouble("vote_average", 0);
         int votes = o.optInt("vote_count");
@@ -197,7 +199,9 @@ final class DetailsView extends View {
         direction = fit(String.join(", ", who.subList(0, Math.min(3, who.size()))));
         List<String> actors = new ArrayList<>();
         JSONArray castList = credits == null ? null : credits.optJSONArray("cast");
-        for (int i = 0; castList != null && i < castList.length() && actors.size() < 5; i++) actors.add(castList.optJSONObject(i).optString("name"));
+        for (int i = 0; castList != null && i < castList.length() && actors.size() < 5; i++) {
+            actors.add(castList.optJSONObject(i).optString("name"));
+        }
         cast = fit(String.join(", ", actors));
         t.overview = o.optString("overview", "");
         if (t.backdrop == null) {
@@ -220,7 +224,8 @@ final class DetailsView extends View {
         for (String[] s : services) if (s[2] == null) sorted.add(s);
         services.clear();
         services.addAll(sorted);
-        others = rentBuy.isEmpty() ? "" : Ui.tr("Para alugar ou comprar: ", "To rent or buy: ") + String.join(", ", rentBuy.subList(0, Math.min(5, rentBuy.size())));
+        others = rentBuy.isEmpty() ? "" : Ui.tr("Para alugar ou comprar: ", "To rent or buy: ")
+                + String.join(", ", rentBuy.subList(0, Math.min(5, rentBuy.size())));
         JSONObject recsJson = o.optJSONObject("recommendations");
         JSONArray list = recsJson == null ? null : recsJson.optJSONArray("results");
         for (int i = 0; list != null && i < list.length() && similar.size() < 14; i++) {
@@ -252,7 +257,7 @@ final class DetailsView extends View {
         }
     }
 
-    /** The Brazilian (or your region's) age rating: "Livre", "14 anos"… */
+    /** Your region's age rating: "Livre", "14 anos"… */
     private static String movieRating(JSONObject releaseDates) {
         JSONArray results = releaseDates == null ? null : releaseDates.optJSONArray("results");
         for (int i = 0; results != null && i < results.length(); i++) {
@@ -327,7 +332,7 @@ final class DetailsView extends View {
 
     private void drawText(Canvas c) {
         float y = 96;
-        c.drawText(kicker.toUpperCase(Ui.en ? Locale.US : Ui.PT), M, y + Ui.cap(kickerPaint), kickerPaint);
+        c.drawText(kicker, M, y + Ui.cap(kickerPaint), kickerPaint);
         y += 44;
         c.save();
         c.translate(M, y);
@@ -352,7 +357,8 @@ final class DetailsView extends View {
         overviewLayout.draw(c);
         c.restore();
         y += overviewLayout.getHeight() + 22;
-        y = credit(c, Ui.tr(title.kind.equals("movie") ? "Direção" : "Criação", title.kind.equals("movie") ? "Director" : "Created by"), direction, y);
+        boolean movie = title.kind.equals("movie");
+        y = credit(c, Ui.tr(movie ? "Direção" : "Criação", movie ? "Director" : "Created by"), direction, y);
         credit(c, Ui.tr("Elenco", "Cast"), cast, y);
     }
 
@@ -374,7 +380,7 @@ final class DetailsView extends View {
         c.drawText(Ui.tr("Assistir em", "Watch on"), M, y + Ui.cap(sectionPaint), sectionPaint);
         y += 48;
         if (services.isEmpty()) {
-            String text = loading ? "" : Ui.tr("Não está em nenhum streaming por assinatura no Brasil.",
+            String text = loading ? "" : Ui.tr("Não está em nenhum streaming por assinatura no seu país.",
                     "Not on any subscription service in your country.");
             c.drawText(text, M, y + 34, notePaint);
             if (!others.isEmpty()) c.drawText(others, M, y + 74, notePaint);
